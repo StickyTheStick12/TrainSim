@@ -85,10 +85,12 @@ def plcPage(change=None):
                     if trackStatusOne == trackStatus[0]:
                         trackStatusOne = trackStatus[1]
                         jsonData['trackOneStatus'] = trackStatus[1]
-                        lst = [""]
                     else:
                         trackStatusOne = trackStatus[0]
                         jsonData['trackOneStatus'] = trackStatus[0]
+
+                    data = {1: "trackOne", 2: jsonData["trackOneStatus"]}
+                    send_data(context, data)
 
                 case "track2":
                     if trackStatusTwo == trackStatus[0]:
@@ -97,6 +99,9 @@ def plcPage(change=None):
                     else:
                         trackStatusTwo = trackStatus[0]
                         jsonData['trackTwoStatus'] = trackStatus[0]
+
+                    data = {1: "trackTwo", 2: jsonData["trackTwoStatus"]}
+                    send_data(context, data)
 
                 case "addTimeForm":
                     change = "addTimeForm"
@@ -212,12 +217,16 @@ async def send_data(context: ModbusServerContext, data: dict) -> None:
         return
 
     data = [ord(char) for char in data]
-    for value in data:
-        context[slave_id].setValues(func_code, address, value)
-        address += 1
+
+    context[slave_id].setValues(func_code, address, data)
+
+    #for value in data:
+    #    context[slave_id].setValues(func_code, address, value)
+    #    address += 1
 
 
 def modbus_helper() -> None:
+    """Helps start modbus from a new thread"""
     loop = asyncio.get_event_loop()
     loop.run_until_complete(modbus_server_thread(context))
 
