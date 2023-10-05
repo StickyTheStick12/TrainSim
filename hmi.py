@@ -89,7 +89,8 @@ def plcPage(change=None):
                         trackStatusOne = trackStatus[0]
                         jsonData['trackOneStatus'] = trackStatus[0]
 
-                    data = {1: "trackOne", 2: jsonData["trackOneStatus"]}
+                    data = ["t", 1, jsonData["trackOneStatus"]]
+
                     send_data(context, data)
 
                 case "track2":
@@ -100,7 +101,7 @@ def plcPage(change=None):
                         trackStatusTwo = trackStatus[0]
                         jsonData['trackTwoStatus'] = trackStatus[0]
 
-                    data = {1: "trackTwo", 2: jsonData["trackTwoStatus"]}
+                    data = ["T", 2, jsonData["trackTwoStatus"]]
                     send_data(context, data)
 
                 case "addTimeForm":
@@ -113,8 +114,10 @@ def plcPage(change=None):
                     trainData = {'trainNumber': request.form.get('trainNumber', False),
                                  'time': request.form.get('departure', False),
                                  'track': request.form.get('tracktype', False)}
-                    send_data(context, trainData)
                     jsonData['trains'].append(trainData)
+
+                    data = ["A"] + list(trainData.values())
+                    send_data(context, data)
 
                     temptime = curTime.replace(" ", "")
                     sorted_data = sorted(jsonData['trains'], key=lambda x: (x['time'] >= curTime, x['time']))
@@ -135,7 +138,8 @@ def plcPage(change=None):
                 case "deleteTime":
                     id = int(request.form.get('id', False))
                     if id <= len(jsonData['trains']):
-                        send_data(context, jsonData["trains"][id-1])
+                        data = ["R"] + list(jsonData["trains"][id-1])
+                        send_data(context, data)
                         jsonData['trains'].pop(id - 1)
 
         writeToJson('data.json', jsonData)
@@ -203,20 +207,24 @@ def setup_server() -> ModbusServerContext:
     return context
 
 
-async def send_data(context: ModbusServerContext, data: dict) -> None:
+async def send_data(context: ModbusServerContext, data: list) -> None:
     """Sends data to client"""
     func_code = 3  # function code for modbus that we want to read and write data from holding register
     slave_id = 0x00  # we broadcast the data to all the connected slaves
     address = 0x00  # the address to where to holding register are, i.e the start address in our case but we can write in the middle too
 
-    data = " ".join(str(value) for value in data.values())
+    # data will be function code, (A)dd, (R)emove, (T)rack status. The rest will be the information until first #
+
+    data = " ".join(str(value) for value in data)
 
     # check that we don't write too much data, or we have an end of line '#' marker
-    if len(data) > 99 or '#' in data:
+    if len(data) > 98 or '#' in data:
         print("Error")
         return
 
     data = [ord(char) for char in data]
+    # we have to add a '#' at the end because otherwise we can have a shorter string the next time
+    data.append(ord("#"))
 
     context[slave_id].setValues(func_code, address, data)
 
