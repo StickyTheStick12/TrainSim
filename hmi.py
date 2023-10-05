@@ -4,6 +4,22 @@ import modules as SQL
 import json
 from datetime import datetime
 
+import asyncio
+import threading
+
+from pymodbus import __version__ as pymodbus_version
+from pymodbus.datastore import (
+    ModbusSequentialDataBlock,
+    ModbusServerContext,
+    ModbusSlaveContext,
+)
+
+from pymodbus.device import ModbusDeviceIdentification
+from pymodbus.transaction import ModbusTlsFramer
+from pymodbus.server import StartAsyncTlsServer
+
+global context
+
 app = Flask(__name__)
 
 ##Sessions för login
@@ -125,6 +141,72 @@ def writeToJson(jsonFile, dataJson):
         dataFile.write(dataJson)
 
 
+async def modbus_server_thread(context: ModbusServerContext) -> None:
+    """Creates the server that will listen at localhost"""
+
+    identity = ModbusDeviceIdentification(
+        info_name={
+            "VendorName": "Pymodbus",
+            "ProductCode": "PM",
+            "VendorUrl": "https://github.com/pymodbus-dev/pymodbus/",
+            "ProductName": "Pymodbus Server",
+            "ModelName": "Pymodbus Server",
+            "MajorMinorRevision": pymodbus_version,
+        }
+    )
+
+    # ssl_context = ssl.create_default_context()
+    # ssl_context.load_cert_chain(certfile="cert.perm", keyfile="key.perm")  # change to file path
+
+    address = ("localhost", 12345)  # change to correct port
+
+    await StartAsyncTlsServer(
+        context=context,
+        host="host",
+        identity=identity,
+        address=address,
+        framer=ModbusTlsFramer,
+        certfile="cert.perm",
+        keyfile="key.perm",
+    )
+
+
+def setup_server() -> ModbusServerContext:
+    """Generates our holding register for the server"""
+    # global context
+    datablock = ModbusSequentialDataBlock(0x00, [0] * 10) # change to however big our list needs to be
+    context = ModbusSlaveContext(
+        di=datablock, co=datablock, hr=datablock, ir=datablock)
+    context = ModbusServerContext(slaves=context, single=True)
+
+    return context
+
+
+async def send_data(context: ModbusServerContext, data: list) -> None:
+    """Sends data to client"""
+    func_code = 3  # function code for modbus that we want to read and write data from holding register
+    slave_id = 0x00  # we broadcast the data to all the connected slaves
+    address = 0x00  # the address to where to holding register are, i.e the start address in our case but we can write in the middle too
+
+    result = " ".join(data)
+
+    data = [ord(char) for char in result]
+
+    for value in data:
+        context[slave_id].setValues(func_code, address, value)
+        address += 1
+
+
+def modbus_helper() -> None:
+    global context
+    context = setup_server()
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(modbus_server_thread(context))
+
+
 if __name__ == '__main__':
-    app.run(debug=True, port="5001")
+    modbus_thread = threading.Thread(target=modbus_helper)
+    modbus_thread.start()
+
+    app.run(ssl_context=("cert.perm", "key.perm"), debug=True, port="5001")
     SQL.closeSession()
