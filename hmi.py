@@ -18,8 +18,6 @@ from pymodbus.device import ModbusDeviceIdentification
 from pymodbus.transaction import ModbusTlsFramer
 from pymodbus.server import StartAsyncTlsServer
 
-global context
-
 app = Flask(__name__)
 
 ##Sessions för login
@@ -30,25 +28,19 @@ login_manager.init_app(app)
 
 
 class Users(UserMixin):
-    def __init__(self, username, password, is_active=True):
+    def __init__(self,username, password,is_active=True):
         self.id = 1
         self.username = username
         self.password = password
         self.is_active = is_active
 
+
     def get_id(self):
         return (self.id)
 
-    def is_active(self, value):
-        self.is_active = value
-        return
-
-
-@login_manager.user_loader
-def loader_user(user_id):
-    # Här måste vi löser ett säkrare sätt
-    user = Users("admin", "password")
-    return user
+    def is_active(self,value):
+         self.is_active = value
+         return
 
 
 @app.route('/', methods=["POST", "GET"])
@@ -76,7 +68,6 @@ def loginPage(invalid=False):
 def plcPage(change=None):
     now = datetime.now()
     curTime = now.strftime("%H : %M")
-    print(curTime)
 
     jsonData = openJson("data.json")
 
@@ -94,6 +85,7 @@ def plcPage(change=None):
                     if trackStatusOne == trackStatus[0]:
                         trackStatusOne = trackStatus[1]
                         jsonData['trackOneStatus'] = trackStatus[1]
+                        lst = [""]
                     else:
                         trackStatusOne = trackStatus[0]
                         jsonData['trackOneStatus'] = trackStatus[0]
@@ -106,20 +98,45 @@ def plcPage(change=None):
                         trackStatusTwo = trackStatus[0]
                         jsonData['trackTwoStatus'] = trackStatus[0]
 
-                case "addTime":
-                    change = "addTime"
+                case "addTimeForm":
+                    change = "addTimeForm"
 
-                case "removeTime":
-                    change = "removeTime"
+                case "deleteTimeForm":
+                    change = "deleteTimeForm"
 
-        formData = {'trainNumber': request.form.get('trainNumber', False), 'time': request.form.get('departure', False),
-                    'track': request.form.get('tracktype', False)}
-        print(formData)
+                case "addNewTime":
+                    trainData = {'trainNumber': request.form.get('trainNumber', False),
+                                 'time': request.form.get('departure', False),
+                                 'track': request.form.get('tracktype', False)}
+                    send_data(context, trainData)
+                    jsonData['trains'].append(trainData)
+
+                    temptime = curTime.replace(" ", "")
+                    sorted_data = sorted(jsonData['trains'], key=lambda x: (x['time'] >= curTime, x['time']))
+                    jsonData['trains'] = sorted_data.copy()
+                    for train in jsonData['trains']:
+                        print(train['time'], temptime)
+                        if train['time'] > temptime:
+                            break
+                        else:
+                            temp = train
+                            print(temp)
+                            sorted_data.pop(0)
+                            sorted_data.append(temp)
+
+                    print(sorted_data)
+                    jsonData['trains'] = sorted_data
+
+                case "deleteTime":
+                    id = int(request.form.get('id', False))
+                    if id <= len(jsonData['trains']):
+                        send_data(context, jsonData["trains"][id-1])
+                        jsonData['trains'].pop(id - 1)
 
         writeToJson('data.json', jsonData)
 
     return render_template("plc.html", trackStatus=trackStatus, trackStatusOne=trackStatusOne,
-                           trackStatusTwo=trackStatusTwo, curTime=curTime, change=change)
+                           trackStatusTwo=trackStatusTwo, curTime=curTime, change=change, trainList=jsonData['trains'])
 
 
 @app.route('/logout')
@@ -139,7 +156,6 @@ def writeToJson(jsonFile, dataJson):
     dataJson = json.dumps(dataJson, indent=3)
     with open(jsonFile, 'w') as dataFile:
         dataFile.write(dataJson)
-
 
 async def modbus_server_thread(context: ModbusServerContext) -> None:
     """Creates the server that will listen at localhost"""
@@ -166,15 +182,15 @@ async def modbus_server_thread(context: ModbusServerContext) -> None:
         identity=identity,
         address=address,
         framer=ModbusTlsFramer,
-        certfile="cert.perm",
-        keyfile="key.perm",
+        certfile=cert,
+        keyfile=key,
     )
 
 
 def setup_server() -> ModbusServerContext:
     """Generates our holding register for the server"""
     # global context
-    datablock = ModbusSequentialDataBlock(0x00, [0] * 10) # change to however big our list needs to be
+    datablock = ModbusSequentialDataBlock(0x00, [35] * 40) # change to however big our list needs to be
     context = ModbusSlaveContext(
         di=datablock, co=datablock, hr=datablock, ir=datablock)
     context = ModbusServerContext(slaves=context, single=True)
@@ -182,31 +198,38 @@ def setup_server() -> ModbusServerContext:
     return context
 
 
-async def send_data(context: ModbusServerContext, data: list) -> None:
+async def send_data(context: ModbusServerContext, data: dict) -> None:
     """Sends data to client"""
     func_code = 3  # function code for modbus that we want to read and write data from holding register
     slave_id = 0x00  # we broadcast the data to all the connected slaves
     address = 0x00  # the address to where to holding register are, i.e the start address in our case but we can write in the middle too
 
-    result = " ".join(data)
+    data = " ".join(str(value) for value in data.values())
 
-    data = [ord(char) for char in result]
+    # check that we don't write too much data, or we have an end of line '#' marker
+    if len(data) > 99 or '#' in data:
+        print("Error")
+        return
 
+    data = [ord(char) for char in data]
     for value in data:
         context[slave_id].setValues(func_code, address, value)
         address += 1
 
 
 def modbus_helper() -> None:
-    global context
-    context = setup_server()
     loop = asyncio.get_event_loop()
     loop.run_until_complete(modbus_server_thread(context))
 
 
 if __name__ == '__main__':
-    modbus_thread = threading.Thread(target=modbus_helper)
+    cert = "cert.perm"
+    key = "key.perm"
+
+    context = setup_server()
+
+    modbus_thread = threading.Thread(target=modbus_helper, args=(context, ))
     modbus_thread.start()
 
-    app.run(ssl_context=("cert.perm", "key.perm"), debug=True, port="5001")
+    app.run(ssl_context=(cert, key), debug=True, port="5001")
     SQL.closeSession()
