@@ -28,19 +28,18 @@ login_manager.init_app(app)
 
 
 class Users(UserMixin):
-    def __init__(self,username, password,is_active=True):
+    def __init__(self, username, password, is_active=True):
         self.id = 1
         self.username = username
         self.password = password
         self.is_active = is_active
 
-
     def get_id(self):
         return (self.id)
 
-    def is_active(self,value):
-         self.is_active = value
-         return
+    def is_active(self, value):
+        self.is_active = value
+        return
 
 
 @app.route('/', methods=["POST", "GET"])
@@ -138,7 +137,7 @@ def plcPage(change=None):
                 case "deleteTime":
                     id = int(request.form.get('id', False))
                     if id <= len(jsonData['trains']):
-                        data = ["R"] + list(jsonData["trains"][id-1])
+                        data = ["R"] + list(jsonData["trains"][id - 1])
                         send_data(context, data)
                         jsonData['trains'].pop(id - 1)
 
@@ -165,6 +164,7 @@ def writeToJson(jsonFile, dataJson):
     dataJson = json.dumps(dataJson, indent=3)
     with open(jsonFile, 'w') as dataFile:
         dataFile.write(dataJson)
+
 
 async def modbus_server_thread(context: ModbusServerContext) -> None:
     """Creates the server that will listen at localhost"""
@@ -199,7 +199,7 @@ async def modbus_server_thread(context: ModbusServerContext) -> None:
 def setup_server() -> ModbusServerContext:
     """Generates our holding register for the server"""
     # global context
-    datablock = ModbusSequentialDataBlock(0x00, [35] * 40) # change to however big our list needs to be
+    datablock = ModbusSequentialDataBlock(0x00, [35] * 40)  # change to however big our list needs to be
     context = ModbusSlaveContext(
         di=datablock, co=datablock, hr=datablock, ir=datablock)
     context = ModbusServerContext(slaves=context, single=True)
@@ -213,22 +213,19 @@ async def send_data(context: ModbusServerContext, data: list) -> None:
     slave_id = 0x00  # we broadcast the data to all the connected slaves
     address = 0x00  # the address to where to holding register are, i.e the start address in our case but we can write in the middle too
 
-    # data will be function code, (A)dd, (R)emove, (T)rack status. The rest will be the information until first #
-
+    # convert our list to a string seperated by space "ghjfjfjf 15:14 1"
     data = " ".join(str(value) for value in data)
 
-    # check that we don't write too much data, or we have an end of line '#' marker
-    if len(data) > 98 or '#' in data:
-        print("Error")
+    # check that we don't write too much data
+    if len(data) > 38:
+        print("Too long data")
         return
 
-    data = [ord(char) for char in data]
+    data = [len(data)] + [ord(char) for char in data]
     # we have to add a '#' at the end because otherwise we can have a shorter string the next time
-    data.append(ord("#"))
-
     context[slave_id].setValues(func_code, address, data)
 
-    #for value in data:
+    # for value in data:
     #    context[slave_id].setValues(func_code, address, value)
     #    address += 1
 
@@ -245,8 +242,53 @@ if __name__ == '__main__':
 
     context = setup_server()
 
-    modbus_thread = threading.Thread(target=modbus_helper, args=(context, ))
+    modbus_thread = threading.Thread(target=modbus_helper, args=(context,))
     modbus_thread.start()
 
     app.run(ssl_context=(cert, key), debug=True, port="5001")
     SQL.closeSession()
+
+
+
+
+
+def test():
+    from pymodbus.server.sync import StartTcpServer
+    from pymodbus.datastore import ModbusSequentialDataBlock
+    from pymodbus.datastore.store import ModbusSlaveContext, ModbusServerContext
+
+    # Initialize a data block with 99 holding registers and 1 coil
+    data_block = ModbusSequentialDataBlock(0, [0] * 99 + [False])
+
+    # Create a Modbus context
+    context = ModbusServerContext(slaves={0: ModbusSlaveContext(holding_registers=data_block)})
+
+    # Start the Modbus server
+    with StartTcpServer(context) as server:
+        server.serve_forever()
+
+
+
+
+
+
+
+    from pymodbus.client.sync import ModbusTcpClient
+
+    # Modbus client configuration
+    client_ip = 'your_server_ip'
+    client_port = 502
+
+    # Connect to the Modbus server
+    client = ModbusTcpClient(client_ip, client_port)
+
+    # Write to the coil (Modbus function code 5)
+    coil_address = 99  # Index of the coil
+    coil_value = True  # Value to write to the coil
+    client.write_coil(coil_address, coil_value)
+
+    # Close the Modbus connection
+    client.close()
+
+
+

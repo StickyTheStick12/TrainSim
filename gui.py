@@ -1,6 +1,9 @@
 from tkinter import *
 import customtkinter
-
+import asyncio
+from pymodbus.client import AsyncModbusTlsClient
+from pymodbus.transaction import ModbusTlsFramer
+from pymodbus.exceptions import ModbusException
 
 class TrainStationHMI(customtkinter.CTk):
     def __init__(self):
@@ -99,4 +102,65 @@ train_station_hmi.remove_train_from_timetable(0)  # Removes 'Train 1'
 
 # Start the main event loop
 train_station_hmi.mainloop()
+
+
+
+
+async def modbus_client_thread(host: str, port: int) -> None:
+    """This thread will start the modbus client and connect to the server"""
+    client = None
+
+    async def run_client() -> None:
+        """Run client"""
+        nonlocal client
+        # ssl_context = ssl.create_default_context()
+        # ssl_context.load_cert_chain(certfile="rootCA.pm", keyfile="rootCA.key")  # change to file path
+
+        client = await AsyncModbusTlsClient(
+            host,
+            port=port,
+            framer=ModbusTlsFramer,
+            certfile="cert.perm",
+            keyfile="key.perm",
+            server_hostname="host",
+        )
+
+        await client.connect()
+        # if we can't connect try again after 5 seconds, if the server hasn't been started yet
+        while not client.connected:
+            await asyncio.sleep(5)
+            await client.connect()
+
+        print("connected")
+
+    async def read_holding_register() -> None:
+        """Reads data from holding register"""
+        nonlocal client
+        try:
+            while True:
+                hold_register = await client.read_holding_registers(0x00, 40, slave=1) # 40 may need to be lower, it is amount we want to read
+                print("New data received:", hold_register.registers)
+                amount_to_read = hold_register.registers[0]
+                data = "".join([chr(char) for char in hold_register.registers[1:amount_to_read]]).split(" ")
+                # call functions to update values in hmi/gui here
+
+                match data[0]:
+                    case "A":
+                        train_station_hmi.add_train_to_timetable('Train 1', '09:00', 'Track 1')
+                    case "R":
+                        train_station_hmi.remove_train_from_timetable(0)
+                    case "T":
+                        pass
+
+                await asyncio.sleep(1)  # wait 1 second before trying to receive more data
+        except ModbusException as exc:
+            print(f"Received ModbusException({exc}) from library")
+            client.close()
+
+    await run_client()
+    await read_holding_register()
+
+
+
+
 
