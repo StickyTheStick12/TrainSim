@@ -2,6 +2,7 @@ from flask import Flask, render_template, request, redirect, url_for, session, f
 from flask_login import login_user, logout_user, login_required, current_user, LoginManager, UserMixin
 import modules as SQL
 import json
+import bcrypt
 from datetime import datetime
 
 import asyncio
@@ -52,6 +53,15 @@ class Users(UserMixin):
         return
 
 
+@login_manager.user_loader
+def loader_user(user_id):
+    #Här måste vi löser ett säkrare sätt
+    authenticate = SQL.checkAuthentication()
+
+    user = Users(authenticate[0],authenticate[1])
+    return user
+
+
 @app.route('/', methods=["POST", "GET"])
 def loginPage(invalid=False):
     if request.method == "POST":
@@ -62,27 +72,29 @@ def loginPage(invalid=False):
         user_credentials = {'username': request.form["username"], 'password': request.form["pwd"]}
         user = Users(user_credentials['username'], user_credentials['password'])
 
-        if user.username == authenticate[0] and user.password == authenticate[1]:
+        if user.username == authenticate[0] and bcrypt.checkpw(user.password.encode(), authenticate[1].encode()):
             login_user(user)
             return redirect(url_for('plcPage'))
         else:
             invalid = True
             return render_template("login.html", invalid=invalid)
 
-    return render_template("login.html", invalid=invalid)
+
+    return render_template("login.html",invalid=invalid)
 
 
 @app.route('/plc', methods=["POST", "GET"])
 @login_required
 def plcPage(change=None):
-    now = datetime.now()
-    curTime = now.strftime("%H : %M")
-
     jsonData = openJson("data.json")
 
     trackStatus = jsonData['trackStatus']
     trackStatusOne = jsonData['trackOneStatus']
     trackStatusTwo = jsonData['trackTwoStatus']
+
+    if request.method == "GET":
+        jsonData['trains'] = sortTimeTable(jsonData['trains'])
+        writeToJson('data.json', jsonData)
 
     if request.method == "POST":
         buttonClicked = request.form.get("button", False)
@@ -99,7 +111,6 @@ def plcPage(change=None):
                         jsonData['trackOneStatus'] = trackStatus[0]
 
                     data = ["t", 1, jsonData["trackOneStatus"]]
-
                     send_data(context, data)
 
                 case "track2":
@@ -124,25 +135,9 @@ def plcPage(change=None):
                                  'time': request.form.get('departure', False),
                                  'track': request.form.get('tracktype', False)}
                     jsonData['trains'].append(trainData)
-
+                    jsonData['trains'] = sortTimeTable(jsonData['trains'])
                     data = ["A"] + list(trainData.values())
                     send_data(context, data)
-
-                    temptime = curTime.replace(" ", "")
-                    sorted_data = sorted(jsonData['trains'], key=lambda x: (x['time'] >= curTime, x['time']))
-                    jsonData['trains'] = sorted_data.copy()
-                    for train in jsonData['trains']:
-                        print(train['time'], temptime)
-                        if train['time'] > temptime:
-                            break
-                        else:
-                            temp = train
-                            print(temp)
-                            sorted_data.pop(0)
-                            sorted_data.append(temp)
-
-                    print(sorted_data)
-                    jsonData['trains'] = sorted_data
 
                 case "deleteTime":
                     id = int(request.form.get('id', False))
@@ -154,7 +149,7 @@ def plcPage(change=None):
         writeToJson('data.json', jsonData)
 
     return render_template("plc.html", trackStatus=trackStatus, trackStatusOne=trackStatusOne,
-                           trackStatusTwo=trackStatusTwo, curTime=curTime, change=change, trainList=jsonData['trains'])
+                           trackStatusTwo=trackStatusTwo, change=change, trainList=jsonData['trains'])
 
 
 @app.route('/logout')
@@ -204,6 +199,26 @@ async def modbus_server_thread(context: ModbusServerContext) -> None:
         certfile=cert,
         keyfile=key,
     )
+
+
+def sortTimeTable(trainList):
+    '''
+        Functions takes in a trainList with Dict in it
+    '''
+    now = datetime.now()
+    curTime = now.strftime("%H:%M")
+    tempTrainList = sorted(trainList, key=lambda x: (x['time'] >= curTime, x['time']))
+    trainList= tempTrainList.copy()
+    for train in trainList:
+        if train['time']>curTime:
+            break
+        else:
+            tempTrainList.append(train)
+            tempTrainList.pop(0)
+
+    trainList = tempTrainList
+
+    return trainList
 
 
 def setup_server() -> ModbusServerContext:
