@@ -9,6 +9,7 @@ import asyncio
 import threading
 import logging
 import socket
+import time
 
 from pymodbus import __version__ as pymodbus_version
 from pymodbus.datastore import (
@@ -171,6 +172,26 @@ def writeToJson(jsonFile, dataJson):
         dataFile.write(dataJson)
 
 
+def sortTimeTable(trainList):
+    '''
+        Functions takes in a trainList with Dict in it
+    '''
+    now = datetime.now()
+    curTime = now.strftime("%H:%M")
+    tempTrainList = sorted(trainList, key=lambda x: (x['time'] >= curTime, x['time']))
+    trainList= tempTrainList.copy()
+    for train in trainList:
+        if train['time']>curTime:
+            break
+        else:
+            tempTrainList.append(train)
+            tempTrainList.pop(0)
+
+    trainList = tempTrainList
+
+    return trainList
+
+
 async def modbus_server_thread(context: ModbusServerContext) -> None:
     """Creates the server that will listen at localhost"""
 
@@ -201,26 +222,6 @@ async def modbus_server_thread(context: ModbusServerContext) -> None:
     )
 
 
-def sortTimeTable(trainList):
-    '''
-        Functions takes in a trainList with Dict in it
-    '''
-    now = datetime.now()
-    curTime = now.strftime("%H:%M")
-    tempTrainList = sorted(trainList, key=lambda x: (x['time'] >= curTime, x['time']))
-    trainList= tempTrainList.copy()
-    for train in trainList:
-        if train['time']>curTime:
-            break
-        else:
-            tempTrainList.append(train)
-            tempTrainList.pop(0)
-
-    trainList = tempTrainList
-
-    return trainList
-
-
 def setup_server() -> ModbusServerContext:
     """Generates our holding register for the server"""
     # global context
@@ -233,7 +234,7 @@ def setup_server() -> ModbusServerContext:
     return context
 
 
-async def send_data(context: ModbusServerContext, data: list) -> None:
+def send_data(context: ModbusServerContext, data: list) -> None:
     """Sends data to client"""
     func_code = 3  # function code for modbus that we want to read and write data from holding register
     slave_id = 0x00  # we broadcast the data to all the connected slaves
@@ -256,8 +257,8 @@ async def send_data(context: ModbusServerContext, data: list) -> None:
             _logger.critical("Client hasn't emptied datastore in 5 seconds; connection may be lost")
             return
         client_check += 1
-        _logger.info("Waiting for client to copy datastore")
-        await asyncio.sleep(1)
+        _logger.info("Waiting for client to copy datastore; sleeping 1 second")
+        time.sleep(1)
 
     _logger.info("Client has read data from datastore, writing new data")
     context[slave_id].setValues(func_code, address, data)

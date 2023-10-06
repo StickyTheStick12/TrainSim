@@ -5,10 +5,19 @@ from pymodbus.client import AsyncModbusTlsClient
 from pymodbus.transaction import ModbusTlsFramer
 from pymodbus.exceptions import ModbusException
 import logging
+import threading
+from queue import Queue
 
 logging.basicConfig()
 _logger = logging.getLogger(__file__)
 _logger.setLevel("DEBUG")
+
+# Modbus variables
+datastore_size = 41  # needs to be the same size as the server
+path_to_cert = "cert.perm"
+path_to_key = "key.perm"
+host = ""
+port = 12345
 
 class TrainStationHMI(customtkinter.CTk):
     def __init__(self):
@@ -93,28 +102,24 @@ class TrainStationHMI(customtkinter.CTk):
                 track_number_label.grid(row=i + 2, column=2, sticky="ew", padx=(0, 10))
 
 
-# Initialize the Train Station HMI
-train_station_hmi = TrainStationHMI()
+    def process_modbus_data(self):
+        try:
+            data = modbus_data_queue.get_nowait()
+        except Queue.empty:
+            data = None
 
+        if data:
+            match data[0]:
+                case "A":
+                    train_station_hmi.add_train_to_timetable('Train 1', '09:00', 'Track 1')
+                case "R":
+                    train_station_hmi.remove_train_from_timetable(0)
+                case "T":
+                    pass
 
-# Adding some trains
-train_station_hmi.add_train_to_timetable('Train 1', '09:00', 'Track 1')
-train_station_hmi.add_train_to_timetable('Train 2', '10:30', 'Track 2')
+        self.after(1000, self.process_modbus_data)
 
-# Removing a train (by index)
-train_station_hmi.remove_train_from_timetable(0)  # Removes 'Train 1'
-train_station_hmi.remove_train_from_timetable(0)  # Removes 'Train 1'
-
-# Start the main event loop
-train_station_hmi.mainloop()
-
-# Modbus variables
-datastore_size = 41  # needs to be the same size as the server
-path_to_cert = "cert.perm"
-path_to_key = "key.perm"
-
-
-async def modbus_client_thread(host: str, port: int) -> None:
+def modbus_client_thread(queue) -> None:
     """This thread will start the modbus client and connect to the server"""
     client = None
 
@@ -161,13 +166,8 @@ async def modbus_client_thread(host: str, port: int) -> None:
                     _logger.debug("Resetting flag")
                     client.write_register(datastore_size-2, 1, slave=1)
 
-                    match data[0]:
-                        case "A":
-                            train_station_hmi.add_train_to_timetable('Train 1', '09:00', 'Track 1')
-                        case "R":
-                            train_station_hmi.remove_train_from_timetable(0)
-                        case "T":
-                            pass
+                    # put data in queue for the GUI thread
+                    queue.put(data)
 
                     # sleeping for 1 second before starting polling again
                     await asyncio.sleep(1)
@@ -178,5 +178,15 @@ async def modbus_client_thread(host: str, port: int) -> None:
             _logger.error(f"Received ModbusException({exc}) from library")
             client.close()
 
-    await run_client()
-    await read_holding_register()
+    asyncio.get_event_loop().run_until_complete(run_client())
+    asyncio.get_event_loop().run_until_complete(read_holding_register())
+
+if __name__ == "__main__":
+    modbus_data_queue = Queue()
+
+    modbus_thread = threading.Thread(target=modbus_client_thread, args=(modbus_data_queue, ))
+    modbus_thread.start()
+    # Initialize the Train Station HMI
+    train_station_hmi = TrainStationHMI()
+    train_station_hmi.after(1000, train_station_hmi.process_modbus_data)
+    train_station_hmi.mainloop()
