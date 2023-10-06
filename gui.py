@@ -4,6 +4,11 @@ import asyncio
 from pymodbus.client import AsyncModbusTlsClient
 from pymodbus.transaction import ModbusTlsFramer
 from pymodbus.exceptions import ModbusException
+import logging
+
+logging.basicConfig()
+_logger = logging.getLogger(__file__)
+_logger.setLevel("DEBUG")
 
 class TrainStationHMI(customtkinter.CTk):
     def __init__(self):
@@ -103,7 +108,10 @@ train_station_hmi.remove_train_from_timetable(0)  # Removes 'Train 1'
 # Start the main event loop
 train_station_hmi.mainloop()
 
-
+# Modbus variables
+datastore_size = 41  # needs to be the same size as the server
+path_to_cert = "cert.perm"
+path_to_key = "key.perm"
 
 
 async def modbus_client_thread(host: str, port: int) -> None:
@@ -120,47 +128,55 @@ async def modbus_client_thread(host: str, port: int) -> None:
             host,
             port=port,
             framer=ModbusTlsFramer,
-            certfile="cert.perm",
-            keyfile="key.perm",
+            certfile=path_to_cert,
+            keyfile=path_to_key,
             server_hostname="host",
         )
+
+        _logger.info("Started client")
 
         await client.connect()
         # if we can't connect try again after 5 seconds, if the server hasn't been started yet
         while not client.connected:
+            _logger.info("Couldn't connect to server, trying again in 5 seconds")
             await asyncio.sleep(5)
             await client.connect()
+        _logger.info("Connected to server")
 
-        print("connected")
+        # Write confirmation to server that we are active
+        await client.write_register(datastore_size-2, 1, slave=1)
+        _logger.info("Wrote confirmation to server")
 
     async def read_holding_register() -> None:
         """Reads data from holding register"""
         nonlocal client
         try:
             while True:
-                hold_register = await client.read_holding_registers(0x00, 40, slave=1) # 40 may need to be lower, it is amount we want to read
-                print("New data received:", hold_register.registers)
-                amount_to_read = hold_register.registers[0]
-                data = "".join([chr(char) for char in hold_register.registers[1:amount_to_read]]).split(" ")
-                # call functions to update values in hmi/gui here
+                # poll the flag bit to see if new information has been written
+                if client.read_holding_registers(datastore_size-2, 1, slave=1).registers == [0]:
+                    _logger.info("New information available")
+                    hold_register = await client.read_holding_registers(0x00, datastore_size-3, slave=1)
+                    amount_to_read = hold_register.registers[0]
+                    data = "".join([chr(char) for char in hold_register.registers[1:amount_to_read]]).split(" ")
+                    _logger.debug("Resetting flag")
+                    client.write_register(datastore_size-2, 1, slave=1)
 
-                match data[0]:
-                    case "A":
-                        train_station_hmi.add_train_to_timetable('Train 1', '09:00', 'Track 1')
-                    case "R":
-                        train_station_hmi.remove_train_from_timetable(0)
-                    case "T":
-                        pass
+                    match data[0]:
+                        case "A":
+                            train_station_hmi.add_train_to_timetable('Train 1', '09:00', 'Track 1')
+                        case "R":
+                            train_station_hmi.remove_train_from_timetable(0)
+                        case "T":
+                            pass
 
-                await asyncio.sleep(1)  # wait 1 second before trying to receive more data
+                    # sleeping for 1 second before starting polling again
+                    await asyncio.sleep(1)
+                else:
+                    _logger.info("sleeping for 1 second")
+                    await asyncio.sleep(1)
         except ModbusException as exc:
-            print(f"Received ModbusException({exc}) from library")
+            _logger.error(f"Received ModbusException({exc}) from library")
             client.close()
 
     await run_client()
     await read_holding_register()
-
-
-
-
-

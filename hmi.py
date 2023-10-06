@@ -6,6 +6,8 @@ from datetime import datetime
 
 import asyncio
 import threading
+import logging
+import socket
 
 from pymodbus import __version__ as pymodbus_version
 from pymodbus.datastore import (
@@ -17,6 +19,14 @@ from pymodbus.datastore import (
 from pymodbus.device import ModbusDeviceIdentification
 from pymodbus.transaction import ModbusTlsFramer
 from pymodbus.server import StartAsyncTlsServer
+
+logging.basicConfig()
+_logger = logging.getLogger(__file__)
+_logger.setLevel("DEBUG")
+
+# Modbus variables
+datastore_size = 41
+modbus_port = 12345
 
 app = Flask(__name__)
 
@@ -182,8 +192,8 @@ async def modbus_server_thread(context: ModbusServerContext) -> None:
 
     # ssl_context = ssl.create_default_context()
     # ssl_context.load_cert_chain(certfile="cert.perm", keyfile="key.perm")  # change to file path
-
-    address = ("localhost", 12345)  # change to correct port
+    address = ("localhost", modbus_port)  # change to correct port
+    _logger.info(f"Server is listening on {socket.gethostbyname(socket.gethostname())}:{modbus_port}")
 
     await StartAsyncTlsServer(
         context=context,
@@ -199,11 +209,12 @@ async def modbus_server_thread(context: ModbusServerContext) -> None:
 def setup_server() -> ModbusServerContext:
     """Generates our holding register for the server"""
     # global context
-    datablock = ModbusSequentialDataBlock(0x00, [35] * 40)  # change to however big our list needs to be
+    datablock = ModbusSequentialDataBlock(0x00, [0] * datastore_size)
     context = ModbusSlaveContext(
         di=datablock, co=datablock, hr=datablock, ir=datablock)
     context = ModbusServerContext(slaves=context, single=True)
 
+    _logger.info("Created datastore")
     return context
 
 
@@ -217,17 +228,36 @@ async def send_data(context: ModbusServerContext, data: list) -> None:
     data = " ".join(str(value) for value in data)
 
     # check that we don't write too much data
-    if len(data) > 38:
-        print("Too long data")
+    if len(data) > datastore_size - 4:
+        _logger.error("data is too long to send over modbus")
         return
 
+    # add the length of the data to the package. We save space if we don't convert it to ascii.
     data = [len(data)] + [ord(char) for char in data]
-    # we have to add a '#' at the end because otherwise we can have a shorter string the next time
+
+    client_check = 0
+    while context[slave_id].getValues(func_code, datastore_size-2, 1) == 0:
+        if client_check == 5:
+            _logger.critical("Client hasn't emptied datastore in 5 seconds; connection may be lost")
+            return
+        client_check += 1
+        _logger.info("Waiting for client to copy datastore")
+        await asyncio.sleep(1)
+
+    _logger.info("Client has read data from datastore, writing new data")
     context[slave_id].setValues(func_code, address, data)
+
+    _logger.debug("Resetting flag")
+    context[slave_id].setValues(func_code, datastore_size-2, [0])
 
     # for value in data:
     #    context[slave_id].setValues(func_code, address, value)
     #    address += 1
+
+    # server starting with flag 0
+    # client connects and changes it to a 1
+    # server writes a 0 to the flag when it writes a new value
+    # client polls the flag for a 0 and when it finds that it will read the holding register and change it to a 1
 
 
 def modbus_helper() -> None:
@@ -245,50 +275,7 @@ if __name__ == '__main__':
     modbus_thread = threading.Thread(target=modbus_helper, args=(context,))
     modbus_thread.start()
 
+    _logger.info("starting flask server")
     app.run(ssl_context=(cert, key), debug=True, port="5001")
     SQL.closeSession()
-
-
-
-
-
-def test():
-    from pymodbus.server.sync import StartTcpServer
-    from pymodbus.datastore import ModbusSequentialDataBlock
-    from pymodbus.datastore.store import ModbusSlaveContext, ModbusServerContext
-
-    # Initialize a data block with 99 holding registers and 1 coil
-    data_block = ModbusSequentialDataBlock(0, [0] * 99 + [False])
-
-    # Create a Modbus context
-    context = ModbusServerContext(slaves={0: ModbusSlaveContext(holding_registers=data_block)})
-
-    # Start the Modbus server
-    with StartTcpServer(context) as server:
-        server.serve_forever()
-
-
-
-
-
-
-
-    from pymodbus.client.sync import ModbusTcpClient
-
-    # Modbus client configuration
-    client_ip = 'your_server_ip'
-    client_port = 502
-
-    # Connect to the Modbus server
-    client = ModbusTcpClient(client_ip, client_port)
-
-    # Write to the coil (Modbus function code 5)
-    coil_address = 99  # Index of the coil
-    coil_value = True  # Value to write to the coil
-    client.write_coil(coil_address, coil_value)
-
-    # Close the Modbus connection
-    client.close()
-
-
 
