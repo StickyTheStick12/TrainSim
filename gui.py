@@ -102,10 +102,10 @@ class TrainStationHMI(customtkinter.CTk):
                 track_number_label.grid(row=i + 2, column=2, sticky="ew", padx=(0, 10))
 
 
-    def process_modbus_data(self):
+    def process_modbus_data(self) -> None:
         try:
             data = modbus_data_queue.get_nowait()
-        except Queue.empty:
+        except Queue.Empty:
             data = None
 
         if data:
@@ -161,6 +161,10 @@ def modbus_client_thread(queue) -> None:
                 if client.read_holding_registers(datastore_size-2, 1, slave=1).registers == [0]:
                     _logger.info("New information available")
                     hold_register = await client.read_holding_registers(0x00, datastore_size-3, slave=1)
+
+                    if hold_register.isError():
+                        _logger.error("Error reading holding register")
+
                     amount_to_read = hold_register.registers[0]
                     data = "".join([chr(char) for char in hold_register.registers[1:amount_to_read]]).split(" ")
                     _logger.debug("Resetting flag")
@@ -177,6 +181,9 @@ def modbus_client_thread(queue) -> None:
         except ModbusException as exc:
             _logger.error(f"Received ModbusException({exc}) from library")
             client.close()
+        except KeyboardInterrupt:
+            _logger.info("Keyboard interrupt received. Exiting.")
+            client.close()
 
     asyncio.get_event_loop().run_until_complete(run_client())
     asyncio.get_event_loop().run_until_complete(read_holding_register())
@@ -189,4 +196,9 @@ if __name__ == "__main__":
     # Initialize the Train Station HMI
     train_station_hmi = TrainStationHMI()
     train_station_hmi.after(1000, train_station_hmi.process_modbus_data)
-    train_station_hmi.mainloop()
+
+    try:
+        train_station_hmi.mainloop()
+    except KeyboardInterrupt:
+        _logger.info("Program terminated by user")
+        modbus_thread.join()
