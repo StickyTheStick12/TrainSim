@@ -3,7 +3,7 @@ from flask_login import login_user, logout_user, login_required, current_user, L
 import modules as SQL
 import json
 import bcrypt
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import asyncio
 import threading
@@ -24,7 +24,6 @@ from pymodbus.transaction import ModbusTlsFramer
 from pymodbus.server import StartAsyncTlsServer
 
 # TODO: fix modbus communication so we send an index to the gui
-# TODO: update hmi
 
 logging.basicConfig()
 _logger = logging.getLogger(__file__)
@@ -99,6 +98,7 @@ def plcPage(change=None):
 
     if request.method == "GET":
         jsonData['trains'] = sortTimeTable(jsonData['trains'])
+        jsonData = trainoccupiestrack(trackStatusOne,trackStatusTwo,jsonData)
         writeToJson('data.json', jsonData)
 
     if request.method == "POST":
@@ -177,6 +177,17 @@ def writeToJson(jsonFile, dataJson):
     dataJson = json.dumps(dataJson, indent=3)
     with open(jsonFile, 'w') as dataFile:
         dataFile.write(dataJson)
+
+
+def trainoccupiestrack(trackStatusOne,trackStatusTwo,jsonData):
+    #goes through the latest train departures and makes tracks available
+    timeFormat = "%H:%M"
+    now = datetime.now()
+    curTime = now.strftime(timeFormat)
+    curTimeObj = now.strptime(curTime,timeFormat)
+
+    for train in reversed(jsonData['trains']):
+        trainTimeObj = datetime.strptime(train['time'],timeFormat)
 
 
 def sortTimeTable(trainList):
