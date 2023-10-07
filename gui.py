@@ -19,6 +19,9 @@ path_to_key = "key.perm"
 host = ""
 port = 12345
 
+# TODO: get correct index from modbus
+# TODO: fix modbus read data
+
 class TrainStationHMI(customtkinter.CTk):
     def __init__(self):
         super().__init__()

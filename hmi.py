@@ -10,6 +10,7 @@ import threading
 import logging
 import socket
 import time
+from bisect import bisect_right, bisect_left
 
 from pymodbus import __version__ as pymodbus_version
 from pymodbus.datastore import (
@@ -21,6 +22,9 @@ from pymodbus.datastore import (
 from pymodbus.device import ModbusDeviceIdentification
 from pymodbus.transaction import ModbusTlsFramer
 from pymodbus.server import StartAsyncTlsServer
+
+# TODO: fix modbus communication so we send an index to the gui
+# TODO: update hmi
 
 logging.basicConfig()
 _logger = logging.getLogger(__file__)
@@ -135,9 +139,12 @@ def plcPage(change=None):
                     trainData = {'trainNumber': request.form.get('trainNumber', False),
                                  'time': request.form.get('departure', False),
                                  'track': request.form.get('tracktype', False)}
-                    jsonData['trains'].append(trainData)
-                    jsonData['trains'] = sortTimeTable(jsonData['trains'])
+
+                    temp = insert_timetable(jsonData['trains'], trainData)
+                    jsonData['trains'] = temp[0]
                     data = ["A"] + list(trainData.values())
+                    # add temp[1]
+
                     send_data(context, data)
 
                 case "deleteTime":
@@ -179,7 +186,7 @@ def sortTimeTable(trainList):
     now = datetime.now()
     curTime = now.strftime("%H:%M")
     tempTrainList = sorted(trainList, key=lambda x: (x['time'] >= curTime, x['time']))
-    trainList= tempTrainList.copy()
+    trainList = tempTrainList.copy()
     for train in trainList:
         if train['time']>curTime:
             break
@@ -190,6 +197,23 @@ def sortTimeTable(trainList):
     trainList = tempTrainList
 
     return trainList
+
+
+def insert_timetable(train_list: list, new_element: dict) -> (list, int):
+    """Insert a new element into the json file and removes the entries whose times have passed."""
+    time_to_insert = new_element['time']
+
+    # Binary search to find the last position with time less than the current time
+    current_time = datetime.now().strftime("%H:%M")
+    index_to_remove = bisect_right([d['time'] for d in train_list], current_time)
+    # Remove elements with times lower than the current time
+    temp = train_list[index_to_remove:]
+
+    # Binary search to find the first position with time greater than or equal to the new time
+    index_to_insert = bisect_left([d['time'] for d in temp], time_to_insert)
+
+    temp.insert(index_to_insert, new_element)
+    return temp, index_to_insert
 
 
 async def modbus_server_thread(context: ModbusServerContext) -> None:
