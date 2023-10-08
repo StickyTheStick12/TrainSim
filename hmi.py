@@ -24,6 +24,8 @@ from pymodbus.transaction import ModbusTlsFramer
 from pymodbus.server import StartAsyncTlsServer
 
 # TODO: fix modbus communication so we send an index to the gui
+# TODO: there may be a problem when we write to the context and the server tries to send the data simultaneously. We may either need to change the modbus source code
+# or change the way we send data. The modbus thread may need to read data from the json file instead so we create an async task that will look for anything new to write.
 
 logging.basicConfig()
 _logger = logging.getLogger(__file__)
