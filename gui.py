@@ -180,7 +180,8 @@ def modbus_client_thread(queue) -> None:
         try:
             while True:
                 # poll the flag bit to see if new information has been written
-                if client.read_holding_registers(datastore_size-2, 1, slave=1).registers == [0]:
+                hold_register = await client.read_holding_registers(datastore_size-2, 1, slave=1)
+                if hold_register.registers == [0]:
                     _logger.info("New information available")
                     hold_register = await client.read_holding_registers(0x00, datastore_size-3, slave=1)
 
