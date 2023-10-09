@@ -3,7 +3,7 @@ from flask_login import login_user, logout_user, login_required, current_user, L
 import modules as SQL
 import json
 import bcrypt
-from datetime import datetime, timedelta
+from datetime import datetime
 
 import asyncio
 import threading
@@ -24,15 +24,13 @@ from pymodbus.transaction import ModbusTlsFramer
 from pymodbus.server import StartAsyncTlsServer
 
 # TODO: fix modbus communication so we send an index to the gui
-# TODO: there may be a problem when we write to the context and the server tries to send the data simultaneously. We may either need to change the modbus source code
-# or change the way we send data. The modbus thread may need to read data from the json file instead so we create an async task that will look for anything new to write.
 
 logging.basicConfig()
 _logger = logging.getLogger(__file__)
 _logger.setLevel("DEBUG")
 
 # Modbus variables
-datastore_size = 41
+datastore_size = 41 # cant be bigger than 125
 modbus_port = 12345
 
 app = Flask(__name__)
@@ -216,16 +214,15 @@ def insert_timetable(train_list: list, new_element: dict) -> (list, int):
     """Insert a new element into the json file and removes the entries whose times have passed."""
     time_to_insert = new_element['time']
 
-    # Binary search to find the last position with time less than the current time
+    # find the last position with time less than the current time
     current_time = datetime.now().strftime("%H:%M")
     index_to_remove = bisect_right([d['time'] for d in train_list], current_time)
-    # Remove elements with times lower than the current time
     temp = train_list[index_to_remove:]
 
-    # Binary search to find the first position with time greater than or equal to the new time
+    # find the first position with time greater than or equal to the new time
     index_to_insert = bisect_left([d['time'] for d in temp], time_to_insert)
-
     temp.insert(index_to_insert, new_element)
+
     return temp, index_to_insert
 
 
@@ -279,6 +276,7 @@ def send_data(context: ModbusServerContext, data: list) -> None:
 
     # convert our list to a string seperated by space "ghjfjfjf 15:14 1"
     data = " ".join(str(value) for value in data)
+    _logger.debug(f"Sending {data}")
 
     # check that we don't write too much data
     if len(data) > datastore_size - 4:
@@ -287,6 +285,8 @@ def send_data(context: ModbusServerContext, data: list) -> None:
 
     # add the length of the data to the package. We save space if we don't convert it to ascii.
     data = [len(data)] + [ord(char) for char in data]
+
+    _logger.debug(f"converted data: {data}")
 
     client_check = 0
     while context[slave_id].getValues(func_code, datastore_size-2, 1) == 0:
