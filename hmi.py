@@ -1,10 +1,11 @@
 from flask import Flask, render_template, request, redirect, url_for, session, flash
 from flask_login import login_user, logout_user, login_required, current_user, LoginManager, UserMixin
-import modules as SQL
-import json
 import bcrypt
-from datetime import datetime, timedelta
 
+import modules as SQL
+
+import json
+from datetime import datetime, timedelta
 import asyncio
 import threading
 import logging
@@ -18,7 +19,6 @@ from pymodbus.datastore import (
     ModbusServerContext,
     ModbusSlaveContext,
 )
-
 from pymodbus.device import ModbusDeviceIdentification
 from pymodbus.transaction import ModbusTlsFramer
 from pymodbus.server import StartAsyncTlsServer
@@ -30,6 +30,9 @@ _logger.setLevel("DEBUG")
 # Modbus variables
 datastore_size = 41 # cant be bigger than 125
 modbus_port = 12345
+
+cert = "cert.perm"
+key = "key.perm"
 
 app = Flask(__name__)
 
@@ -266,7 +269,7 @@ def trainoccupiestrack(trackStatusOne, trackStatusTwo, jsonData):
                 train['tracktoken'] = '2'
                 trackStatusTwo = 'Occupied'
                 jsonData['trackTwoStatus'] = trackStatusTwo
-            elif (train['track'] == '1' and trackStatusOne == 'Occupied') or (train['track'] == '2' and trackStatustwo == 'Occupied'):
+            elif (train['track'] == '1' and trackStatusOne == 'Occupied') or (train['track'] == '2' and trackStatusTwo == 'Occupied'):
                 if train['tracktoken'] == '0':
                     trainTimeObj += timedelta(minutes=5)
                     newtime = trainTimeObj.strftime("%H:%M")
@@ -378,9 +381,6 @@ def modbus_helper() -> None:
 
 
 if __name__ == '__main__':
-    cert = "cert.perm"
-    key = "key.perm"
-
     modbus_data_queue = Queue()
 
     modbus_thread = threading.Thread(target=modbus_helper)
