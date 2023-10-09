@@ -134,7 +134,6 @@ class TrainStation(ctk.CTk):
                     train_station_hmi.remove_train_from_timetable(int(data[0]))
                 case "T":
                     train_station_hmi.update_data_tracks(int(data[0]), data[2])
-                    pass
 
         self.after(1000, self.process_modbus_data)
 
