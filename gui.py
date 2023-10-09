@@ -1,11 +1,11 @@
 import tkinter as tk
 import tkinter.font as tkfont
 import customtkinter as ctk
-
-import asyncio
 from pymodbus.client import AsyncModbusTlsClient
 from pymodbus.transaction import ModbusTlsFramer
 from pymodbus.exceptions import ModbusException
+
+import asyncio
 import logging
 import threading
 from queue import Queue
@@ -127,13 +127,13 @@ class TrainStation(ctk.CTk):
         if not modbus_data_queue.empty():
             data = modbus_data_queue.get_nowait()
 
-            match data[0]:
+            match data[1]:
                 case "A":
-                    train_station_hmi.add_train_to_timetable(int(data[1]), data[2:]) # 1, 'Train 1', '09:00', 'Track 1')
+                    train_station_hmi.add_train_to_timetable(int(data[0]), data[2:]) # 1, 'Train 1', '09:00', 'Track 1')
                 case "R":
-                    train_station_hmi.remove_train_from_timetable(int(data[1]))
+                    train_station_hmi.remove_train_from_timetable(int(data[0]))
                 case "T":
-                    train_station_hmi.update_data_tracks(int(data[1]), data[2])
+                    train_station_hmi.update_data_tracks(int(data[0]), data[2])
                     pass
 
         self.after(1000, self.process_modbus_data)
