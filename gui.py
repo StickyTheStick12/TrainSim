@@ -185,19 +185,19 @@ def modbus_client_thread(queue) -> None:
                     _logger.info("New information available")
                     hold_register = await client.read_holding_registers(0x00, datastore_size-3, slave=1)
 
-                    if hold_register.isError():
+                    if not hold_register.isError():
+                        # 10 1 gffff 15:15 1
+                        amount_to_read = hold_register.registers[0]
+                        idx = hold_register.registers[1]
+                        data = [idx] + "".join([chr(char) for char in hold_register.registers[2:2+amount_to_read]]).split(" ")
+                        _logger.debug(f"received {data}")
+                        _logger.debug("Resetting flag")
+                        client.write_register(datastore_size-2, 1, slave=1)
+
+                        # put data in queue for the GUI thread
+                        queue.put(data)
+                    else:
                         _logger.error("Error reading holding register")
-                    # 10 1 gffff 15:15 1
-                    amount_to_read = hold_register.registers[0]
-                    idx = hold_register.registers[1]
-                    data = [idx] + "".join([chr(char) for char in hold_register.registers[2:2+amount_to_read]]).split(" ")
-                    _logger.debug(f"received {data}")
-                    _logger.debug("Resetting flag")
-                    client.write_register(datastore_size-2, 1, slave=1)
-
-                    # put data in queue for the GUI thread
-                    queue.put(data)
-
                     # sleeping for 1 second before starting polling again
                     await asyncio.sleep(1)
                 else:
