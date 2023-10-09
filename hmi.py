@@ -371,7 +371,7 @@ async def send_data(context: ModbusServerContext) -> None:
 
 def modbus_helper() -> None:
     """Helps start modbus from a new thread"""
-    loop = asyncio.get_event_loop()
+    loop = asyncio.new_event_loop()
     context = setup_server()
     loop.create_task(send_data(context))
     loop.run_until_complete(modbus_server_thread(context))
