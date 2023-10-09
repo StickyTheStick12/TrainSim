@@ -52,11 +52,11 @@ class TrainStation(ctk.CTk):
         self.create_timetable_layout()
         self.create_track_layout()
 
-        self.add_data_timetable(["Train 2", "Track 1", "11:00"])
-        self.add_data_timetable(["Train 1", "Track 1", "11:00"])
+        self.add_data_timetable(0, ["Train 2", "Track 1", "11:00"])
+        self.add_data_timetable(1, ["Train 1", "Track 1", "11:00"])
         self.remove_data_timetable(0)
 
-        self.update_data_tracks(2, "red")
+        self.update_data_tracks(2, "Occupied")
 
     def create_timetable_layout(self):
         timetable_label = ctk.CTkLabel(self.timetable_frame, text="Timetable", font=self.title_font,
@@ -127,13 +127,13 @@ class TrainStation(ctk.CTk):
         if not modbus_data_queue.empty():
             data = modbus_data_queue.get_nowait()
 
-            match data[1]:
+            match data[0]:
                 case "A":
-                    train_station_hmi.add_train_to_timetable(int(data[0]), data[2:]) # 1, 'Train 1', '09:00', 'Track 1')
+                    train_station_hmi.add_train_to_timetable(int(data[1]), data[2:]) # 1, 'Train 1', '09:00', 'Track 1')
                 case "R":
-                    train_station_hmi.remove_train_from_timetable(int(data[2]))
+                    train_station_hmi.remove_train_from_timetable(int(data[1]))
                 case "T":
-                    train_station_hmi.update_data_tracks(int(data[2]), data[3])
+                    train_station_hmi.update_data_tracks(int(data[1]), data[2])
                     pass
 
         self.after(1000, self.process_modbus_data)

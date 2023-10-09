@@ -151,7 +151,7 @@ def plcPage(change=None):
                 case "deleteTime":
                     id = int(request.form.get('id', False))
                     if id <= len(jsonData['trains']):
-                        data = ["R"] + [id-1] + list(jsonData["trains"][id - 1])
+                        data = ["R"] + [id-1]
                         modbus_data_queue.put(data)
                         jsonData['trains'].pop(id - 1)
 
@@ -201,7 +201,7 @@ def trainoccupiestrack(trackStatusOne, trackStatusTwo, jsonData):
                 train['tracktoken'] = '2'
                 trackStatusTwo = 'Occupied'
                 jsonData['trackTwoStatus'] = trackStatusTwo
-            elif (train['track'] == '1' and trackStatusOne == 'Occupied') or (train['track'] == '2' and trackStatustwo == 'Occupied'):
+            elif (train['track'] == '1' and trackStatusOne == 'Occupied') or (train['track'] == '2' and trackStatusTwo == 'Occupied'):
                 if train['tracktoken'] == '0':
                     trainTimeObj += timedelta(minutes=5)
                     newtime = trainTimeObj.strftime("%H:%M")
@@ -347,7 +347,7 @@ async def send_data(context: ModbusServerContext) -> None:
                     _logger.critical("Client hasn't emptied datastore in 5 seconds; connection may be lost")
                     return
                 client_check += 1
-                _logger.info("Waiting for client to copy datastore; sleeping 1 second")
+                _logger.info("Waiting for client to copy datastore; sleeping 2 second")
                 await asyncio.sleep(2) # give the server control so it can answer the client
 
             _logger.info("Client has read data from datastore, writing new data")
