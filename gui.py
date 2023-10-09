@@ -198,11 +198,9 @@ def modbus_client_thread(queue) -> None:
                         queue.put(data)
                     else:
                         _logger.error("Error reading holding register")
-                    # sleeping for 1 second before starting polling again
-                    await asyncio.sleep(1)
-                else:
-                    _logger.info("sleeping for 1 second")
-                    await asyncio.sleep(1)
+
+                _logger.info("sleeping for 1 second")
+                await asyncio.sleep(1)
         except ModbusException as exc:
             _logger.error(f"Received ModbusException({exc}) from library")
             client.close()
