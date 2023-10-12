@@ -302,7 +302,7 @@ async def send_data(context: ModbusServerContext) -> None:
         slave_id = 0x00  # we broadcast the data to all the connected slaves
         address = 0x00  # the address to where to holding register are, i.e the start address in our case but we can write in the middle too
 
-        # check that index isn't bigger than what can be placed inside modbus
+        # check that index isn't bigger than what can be placed inside a single modbus register
         if data[1] < 65535:
             # convert our list to a string seperated by space "ghjfjfjf 15:14 1"
             data = data[0] + " " + " ".join(str(value) for value in data[2:])
@@ -316,6 +316,7 @@ async def send_data(context: ModbusServerContext) -> None:
             # add the length of the data to the package. We save space if we don't convert it to ascii.
             data = [len(data)] + [data[1]] + [ord(char) for char in data]
         else:
+            # a register is 2 bytes, if we have a number greater than 2 bytes we have to use more than one register
             _logger.critical("Maximum allowed trains are 65535")
             return
 

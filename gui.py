@@ -134,11 +134,11 @@ class TrainStation(ctk.CTk):
             match data[1]:
                 case "A":
                     train_station_hmi.add_train_to_timetable(int(data[0]),
-                                                             data[2:])  # 1, [(Train)'1', '09:00', (Track)'1'])
+                                                             data[2:])  # (index)1, [(Train)'1', '09:00', (Track)'1'])
                 case "R":
-                    train_station_hmi.remove_train_from_timetable(int(data[0]))
+                    train_station_hmi.remove_train_from_timetable(int(data[0]))  # (index) 1
                 case "T":
-                    train_station_hmi.update_data_tracks(int(data[0]), data[2])
+                    train_station_hmi.update_data_tracks(int(data[0]), data[2])  # (track) 1, (status) "occupied"
 
         self.after(1000, self.process_modbus_data)
 
@@ -175,7 +175,7 @@ def modbus_client_thread(queue) -> None:
         _logger.info("Connected to server")
 
         # Write confirmation to server that we are active
-        await client.write_register(datastore_size - 2, 1, slave=1)
+        client.write_register(datastore_size - 2, 1, slave=1)
         _logger.debug("Wrote confirmation to server")
 
     async def read_holding_register() -> None:
