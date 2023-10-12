@@ -28,7 +28,7 @@ _logger = logging.getLogger(__file__)
 _logger.setLevel("DEBUG")
 
 # Modbus variables
-datastore_size = 41 # cant be bigger than 125
+datastore_size = 41  # cant be bigger than 125
 modbus_port = 12345
 
 cert = "cert.perm"
@@ -60,10 +60,10 @@ class Users(UserMixin):
 
 @login_manager.user_loader
 def loader_user(user_id):
-    #Här måste vi löser ett säkrare sätt
+    # Här måste vi löser ett säkrare sätt
     authenticate = checkAuthentication()
 
-    user = Users(authenticate[0],authenticate[1])
+    user = Users(authenticate[0], authenticate[1])
     return user
 
 
@@ -84,8 +84,7 @@ def loginPage(invalid=False):
             invalid = True
             return render_template("login.html", invalid=invalid)
 
-
-    return render_template("login.html",invalid=invalid)
+    return render_template("login.html", invalid=invalid)
 
 
 @app.route('/plc', methods=["POST", "GET"])
@@ -99,7 +98,7 @@ def plcPage(change=None):
 
     if request.method == "GET":
         jsonData['trains'] = sortTimeTable(jsonData['trains'])
-        jsonData = trainoccupiestrack(trackStatusOne,trackStatusTwo,jsonData)
+        jsonData = trainoccupiestrack(trackStatusOne, trackStatusTwo, jsonData)
         writeToJson('data.json', jsonData)
 
     if request.method == "POST":
@@ -154,7 +153,7 @@ def plcPage(change=None):
                 case "deleteTime":
                     id = int(request.form.get('id', False))
                     if id <= len(jsonData['trains']):
-                        data = ["R"] + [id-1]
+                        data = ["R"] + [id - 1]
                         modbus_data_queue.put(data)
                         jsonData['trains'].pop(id - 1)
 
@@ -184,18 +183,18 @@ def writeToJson(jsonFile, dataJson):
 
 
 def trainoccupiestrack(trackStatusOne, trackStatusTwo, jsonData):
-    #sets all train tokens to 0 then gives train tokens to the next train thats arriving at the station or the train at the station so it doesnt update its own time
+    # sets all train tokens to 0 then gives train tokens to the next train thats arriving at the station or the train at the station so it doesnt update its own time
     timeFormat = "%H:%M"
     now = datetime.now()
     curTime = now.strftime(timeFormat)
-    curTimeObj = now.strptime(curTime,timeFormat)
+    curTimeObj = now.strptime(curTime, timeFormat)
     trackStatusOne = 'Available'
     trackStatusTwo = 'Available'
     for train in jsonData['trains']:
         train['tracktoken'] = '0'
     for train in jsonData['trains']:
-        trainTimeObj = datetime.strptime(train['time'],timeFormat)
-        if train['time'] >= curTime and trainTimeObj-timedelta(minutes=5) <= curTimeObj:
+        trainTimeObj = datetime.strptime(train['time'], timeFormat)
+        if train['time'] >= curTime and trainTimeObj - timedelta(minutes=5) <= curTimeObj:
             if train['track'] == '1' and trackStatusOne == 'Available':
                 train['tracktoken'] = '1'
                 trackStatusOne = 'Occupied'
@@ -204,7 +203,8 @@ def trainoccupiestrack(trackStatusOne, trackStatusTwo, jsonData):
                 train['tracktoken'] = '2'
                 trackStatusTwo = 'Occupied'
                 jsonData['trackTwoStatus'] = trackStatusTwo
-            elif (train['track'] == '1' and trackStatusOne == 'Occupied') or (train['track'] == '2' and trackStatusTwo == 'Occupied'):
+            elif (train['track'] == '1' and trackStatusOne == 'Occupied') or (
+                    train['track'] == '2' and trackStatusTwo == 'Occupied'):
                 if train['tracktoken'] == '0':
                     trainTimeObj += timedelta(minutes=5)
                     newtime = trainTimeObj.strftime("%H:%M")
@@ -221,7 +221,7 @@ def sortTimeTable(trainList):
     tempTrainList = sorted(trainList, key=lambda x: (x['time'] >= curTime, x['time']))
     trainList = tempTrainList.copy()
     for train in trainList:
-        if train['time']>curTime:
+        if train['time'] > curTime:
             break
         else:
             tempTrainList.append(train)
@@ -301,37 +301,39 @@ async def send_data(context: ModbusServerContext) -> None:
             slave_id = 0x00  # we broadcast the data to all the connected slaves
             address = 0x00  # the address to where to holding register are, i.e the start address in our case but we can write in the middle too
 
-            idx = data[1]
+            # check that index isn't bigger than what can be placed inside modbus
+            if data[1] < 65535:
+                # convert our list to a string seperated by space "ghjfjfjf 15:14 1"
+                data = data[0] + " " + " ".join(str(value) for value in data[2:])
+                _logger.debug(f"Sending {data}")
 
-            # convert our list to a string seperated by space "ghjfjfjf 15:14 1"
-            data = data[0] + " " + " ".join(str(value) for value in data[2:])
-            _logger.debug(f"Sending {data}")
+                # check that we don't write too much data
+                if len(data) > datastore_size - 5:
+                    _logger.error("data is too long to send over modbus")
+                    return
 
-            # check that we don't write too much data
-            if len(data) > datastore_size - 5:
-                _logger.error("data is too long to send over modbus")
+                # add the length of the data to the package. We save space if we don't convert it to ascii.
+                data = [len(data)] + [data[1]] + [ord(char) for char in data]
+            else:
+                _logger.critical("Maximum allowed trains are 65535")
                 return
-
-
-            # add the length of the data to the package. We save space if we don't convert it to ascii.
-            data = [len(data)] + [idx] + [ord(char) for char in data]
 
             _logger.debug(f"converted data: {data}")
 
             client_check = 0
-            while context[slave_id].getValues(func_code, datastore_size-2, 1) == 0:
+            while context[slave_id].getValues(func_code, datastore_size - 2, 1) == 0:
                 if client_check == 5:
                     _logger.critical("Client hasn't emptied datastore in 10 seconds; connection may be lost")
                     return
                 client_check += 1
                 _logger.debug("Waiting for client to copy datastore; sleeping 2 second")
-                await asyncio.sleep(2) # give the server control so it can answer the client
+                await asyncio.sleep(2)  # give the server control so it can answer the client
 
             _logger.debug("Client has read data from datastore, writing new data")
             context[slave_id].setValues(func_code, address, data)
 
             _logger.debug("Resetting flag")
-            context[slave_id].setValues(func_code, datastore_size-2, [0])
+            context[slave_id].setValues(func_code, datastore_size - 2, [0])
 
             # for value in data:
             #    context[slave_id].setValues(func_code, address, value)
