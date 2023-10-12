@@ -2,7 +2,7 @@ from flask import Flask, render_template, request, redirect, url_for, session, f
 from flask_login import login_user, logout_user, login_required, current_user, LoginManager, UserMixin
 import bcrypt
 
-import modules as SQL
+from modules import checkAuthentication, closeSession
 
 import json
 from datetime import datetime, timedelta
@@ -61,7 +61,7 @@ class Users(UserMixin):
 @login_manager.user_loader
 def loader_user(user_id):
     #Här måste vi löser ett säkrare sätt
-    authenticate = SQL.checkAuthentication()
+    authenticate = checkAuthentication()
 
     user = Users(authenticate[0],authenticate[1])
     return user
@@ -71,7 +71,7 @@ def loader_user(user_id):
 def loginPage(invalid=False):
     if request.method == "POST":
 
-        authenticate = SQL.checkAuthentication()
+        authenticate = checkAuthentication()
 
         ## Här får vi data från loginet. Gör backend saker som kontroller etc
         user_credentials = {'username': request.form["username"], 'password': request.form["pwd"]}
@@ -315,7 +315,7 @@ def setup_server() -> ModbusServerContext:
         di=datablock, co=datablock, hr=datablock, ir=datablock)
     context = ModbusServerContext(slaves=context, single=True)
 
-    _logger.info("Created datastore")
+    _logger.debug("Created datastore")
     return context
 
 
@@ -353,10 +353,10 @@ async def send_data(context: ModbusServerContext) -> None:
                     _logger.critical("Client hasn't emptied datastore in 10 seconds; connection may be lost")
                     return
                 client_check += 1
-                _logger.info("Waiting for client to copy datastore; sleeping 2 second")
+                _logger.debug("Waiting for client to copy datastore; sleeping 2 second")
                 await asyncio.sleep(2) # give the server control so it can answer the client
 
-            _logger.info("Client has read data from datastore, writing new data")
+            _logger.debug("Client has read data from datastore, writing new data")
             context[slave_id].setValues(func_code, address, data)
 
             _logger.debug("Resetting flag")
@@ -390,6 +390,6 @@ if __name__ == '__main__':
     modbus_thread.start()
 
     app.run(ssl_context=(cert, key), debug=True, port="5001")
-    SQL.closeSession()
+    closeSession()
 
     modbus_thread.join()

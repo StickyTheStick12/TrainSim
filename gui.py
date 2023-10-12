@@ -129,7 +129,7 @@ class TrainStation(ctk.CTk):
 
             match data[1]:
                 case "A":
-                    train_station_hmi.add_train_to_timetable(int(data[0]), data[2:]) # 1, 'Train 1', '09:00', 'Track 1')
+                    train_station_hmi.add_train_to_timetable(int(data[0]), data[2:]) # 1, [(Train)'1', '09:00', (Track)'1'])
                 case "R":
                     train_station_hmi.remove_train_from_timetable(int(data[0]))
                 case "T":
@@ -171,7 +171,7 @@ def modbus_client_thread(queue) -> None:
 
         # Write confirmation to server that we are active
         await client.write_register(datastore_size-2, 1, slave=1)
-        _logger.info("Wrote confirmation to server")
+        _logger.debug("Wrote confirmation to server")
 
     async def read_holding_register() -> None:
         """Reads data from holding register"""
@@ -181,11 +181,11 @@ def modbus_client_thread(queue) -> None:
                 # poll the flag bit to see if new information has been written
                 hold_register = await client.read_holding_registers(datastore_size-2, 1, slave=1)
                 if hold_register.registers == [0]:
-                    _logger.info("New information available")
+                    _logger.debug("New information available")
                     hold_register = await client.read_holding_registers(0x00, datastore_size-3, slave=1)
 
                     if not hold_register.isError():
-                        # 10 1 gffff 15:15 1
+                        # 10 1 A gffff 15:15 1
                         amount_to_read = hold_register.registers[0]
                         idx = hold_register.registers[1]
                         data = [idx] + "".join([chr(char) for char in hold_register.registers[2:2+amount_to_read]]).split(" ")
@@ -198,7 +198,7 @@ def modbus_client_thread(queue) -> None:
                     else:
                         _logger.error("Error reading holding register")
 
-                _logger.info("sleeping for 1 second")
+                _logger.debug("sleeping for 1 second")
                 await asyncio.sleep(1)
         except ModbusException as exc:
             _logger.error(f"Received ModbusException({exc}) from library")
