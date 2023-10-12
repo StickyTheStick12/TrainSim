@@ -60,12 +60,6 @@ class TrainStation(ctk.CTk):
         self.timetable_data = []
         self.track_data = []
 
-        self.add_data_timetable(["Train 2", "Track 1", "11:00"])
-        self.add_data_timetable(["Train 1", "Track 1", "11:00"])
-        self.remove_data_timetable(0)
-
-        self.update_data_tracks(2, "red")
-
     def create_timetable_layout(self):
         timetable_label = ctk.CTkLabel(self.timetable_frame, text = "Timetable", font = self.title_font,
                                        corner_radius = 6)
@@ -136,10 +130,9 @@ class TrainStation(ctk.CTk):
 
             match data[1]:
                 case "A":
-                    train_station_hmi.add_train_to_timetable(int(data[0]),
-                                                             data[2:])  # (index)1, [(Train)'1', '09:00', (Track)'1'])
+                    self.add_data_timetable(int(data[0]), data[2:])  # (index)1, [(Train)'1', '09:00', (Track)'1'])
                 case "R":
-                    train_station_hmi.remove_train_from_timetable(int(data[0]))  # (index) 1
+                    train_station_hmi.remove_data_timetable(int(data[0]))  # (index) 1
                 case "T":
                     train_station_hmi.update_data_tracks(int(data[0]), data[2])  # (track) 1, (status) "occupied"
 
@@ -178,7 +171,7 @@ def modbus_client_thread(modbus_data_queue) -> None:
         _logger.info("Connected to server")
 
         # Write confirmation to server that we are active
-        client.write_register(datastore_size - 2, 1, slave=1)
+        await client.write_register(datastore_size - 2, 1, slave=1)
         _logger.debug("Wrote confirmation to server")
 
     async def read_holding_register() -> None:
@@ -200,7 +193,7 @@ def modbus_client_thread(modbus_data_queue) -> None:
                             [chr(char) for char in hold_register.registers[2:2 + amount_to_read]]).split(" ")
                         _logger.debug(f"received {data}")
                         _logger.debug("Resetting flag")
-                        client.write_register(datastore_size - 2, 1, slave=1)
+                        await client.write_register(datastore_size - 2, 1, slave=1)
 
                         # put data in queue for the GUI thread
                         modbus_data_queue.put(data)
@@ -236,3 +229,4 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         _logger.info("Program terminated by user")
         modbus_thread.join()
+    modbus_thread.join()
