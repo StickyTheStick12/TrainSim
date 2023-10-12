@@ -143,7 +143,7 @@ class TrainStation(ctk.CTk):
         self.after(1000, self.process_modbus_data)
 
 
-def modbus_client_thread(queue) -> None:
+def modbus_client_thread(modbus_data_queue) -> None:
     """This thread will start the modbus client and connect to the server"""
     client = None
 
@@ -200,7 +200,7 @@ def modbus_client_thread(queue) -> None:
                         client.write_register(datastore_size - 2, 1, slave=1)
 
                         # put data in queue for the GUI thread
-                        queue.put(data)
+                        modbus_data_queue.put(data)
                     else:
                         _logger.error("Error reading holding register")
 
