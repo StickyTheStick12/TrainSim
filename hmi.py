@@ -24,14 +24,14 @@ from pymodbus.server import StartAsyncTlsServer
 
 logging.basicConfig()
 _logger = logging.getLogger(__file__)
-_logger.setLevel("DEBUG")
+_logger.setLevel("WARNING")
 
 # Modbus variables
 datastore_size = 41  # cant be bigger than 125
 modbus_port = 12345
 
-cert = "/home/vboxuser/tls/cert.pem"
-key = "/home/vboxuser/tls/key.pem"
+cert = "cert.pem"
+key = "key.pem"
 
 app = Flask(__name__)
 
@@ -77,7 +77,7 @@ def loginPage(invalid=False):
         user_credentials = {'username': request.form["username"], 'password': request.form["pwd"]}
         user = Users(user_credentials['username'],user_credentials['password'])
 
-        if user.username == authenticate[0]:
+        if user.username == authenticate[0] and bcrypt.checkpw(user.password.encode(),authenticate[1].encode()):
             login_user(user)
             return redirect(url_for('plcPage'))
         else:
