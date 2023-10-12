@@ -2,7 +2,7 @@ from flask import Flask, render_template, request, redirect, url_for, session, f
 from flask_login import login_user, logout_user, login_required, current_user, LoginManager, UserMixin
 import bcrypt
 
-from modules import checkAuthentication, closeSession
+import modules as SQL
 
 import json
 from datetime import datetime, timedelta
@@ -44,47 +44,49 @@ login_manager.init_app(app)
 
 
 class Users(UserMixin):
-    def __init__(self, username, password, is_active=True):
+    def __init__(self,username, password,is_active=True):
         self.id = 1
         self.username = username
         self.password = password
         self.is_active = is_active
 
+
     def get_id(self):
         return (self.id)
 
-    def is_active(self, value):
-        self.is_active = value
-        return
+    def is_active(self,value):
+         self.is_active = value
+         return
 
 
 @login_manager.user_loader
 def loader_user(user_id):
-    # Här måste vi löser ett säkrare sätt
-    authenticate = checkAuthentication()
+    #Här måste vi löser ett säkrare sätt
+    authenticate = SQL.checkAuthentication()
 
-    user = Users(authenticate[0], authenticate[1])
+    user = Users(authenticate[0],authenticate[1])
     return user
 
 
-@app.route('/', methods=["POST", "GET"])
+@app.route('/', methods=["POST","GET"])
 def loginPage(invalid=False):
     if request.method == "POST":
 
-        authenticate = checkAuthentication()
+        authenticate = SQL.checkAuthentication()
 
         ## Här får vi data från loginet. Gör backend saker som kontroller etc
         user_credentials = {'username': request.form["username"], 'password': request.form["pwd"]}
-        user = Users(user_credentials['username'], user_credentials['password'])
+        user = Users(user_credentials['username'],user_credentials['password'])
 
-        if user.username == authenticate[0] and bcrypt.checkpw(user.password.encode(), authenticate[1].encode()):
+        if user.username == authenticate[0] and bcrypt.checkpw(user.password.encode(),authenticate[1].encode()):
             login_user(user)
             return redirect(url_for('plcPage'))
         else:
-            invalid = True
-            return render_template("login.html", invalid=invalid)
+            invalid=True
+            return render_template("login.html",invalid=invalid)
 
-    return render_template("login.html", invalid=invalid)
+
+    return render_template("login.html",invalid=invalid)
 
 
 @app.route('/plc', methods=["POST", "GET"])
@@ -103,7 +105,6 @@ def plcPage(change=None):
 
     if request.method == "POST":
         buttonClicked = request.form.get("button", False)
-        print(buttonClicked)
 
         if buttonClicked != False:
             match buttonClicked:
@@ -115,9 +116,6 @@ def plcPage(change=None):
                         trackStatusOne = trackStatus[0]
                         jsonData['trackOneStatus'] = trackStatus[0]
 
-                    data = ["t", 1, jsonData["trackOneStatus"]]
-                    modbus_data_queue(data)
-
                 case "track2":
                     if trackStatusTwo == trackStatus[0]:
                         trackStatusTwo = trackStatus[1]
@@ -126,9 +124,6 @@ def plcPage(change=None):
                         trackStatusTwo = trackStatus[0]
                         jsonData['trackTwoStatus'] = trackStatus[0]
 
-                    data = ["T", 2, jsonData["trackTwoStatus"]]
-                    modbus_data_queue.put(data)
-
                 case "addTimeForm":
                     change = "addTimeForm"
 
@@ -136,31 +131,23 @@ def plcPage(change=None):
                     change = "deleteTimeForm"
 
                 case "addNewTime":
-                    trainData = {'trainNumber': request.form.get('trainNumber', False),
+                    trainData = {'trackToken': "0",
+                                 'trainNumber': request.form.get('trainNumber', False),
                                  'time': request.form.get('departure', False),
                                  'track': request.form.get('tracktype', False)}
-
-                    data = trainData.copy()
-                    trainData['tracktoken'] = '0'
-
-                    temp = insert_timetable(jsonData['trains'], trainData)
-                    jsonData['trains'] = temp[0]
+                    jsonData['trains'].append(trainData)
+                    jsonData['trains'] = sortTimeTable(jsonData['trains'])
                     jsonData = trainoccupiestrack(trackStatusOne, trackStatusTwo, jsonData)
-                    data = ["A"] + [temp[1]] + list(data.values())
-
-                    modbus_data_queue.put(data)
 
                 case "deleteTime":
                     id = int(request.form.get('id', False))
                     if id <= len(jsonData['trains']):
-                        data = ["R"] + [id - 1]
-                        modbus_data_queue.put(data)
                         jsonData['trains'].pop(id - 1)
 
         writeToJson('data.json', jsonData)
 
-    return render_template("plc.html", trackStatus=trackStatus, trackStatusOne=trackStatusOne,
-                           trackStatusTwo=trackStatusTwo, change=change, trainList=jsonData['trains'])
+    return render_template("plc.html", trackStatus=trackStatus, trackStatusOne=jsonData['trackOneStatus'],
+                           trackStatusTwo=jsonData['trackTwoStatus'], change=change, trainList=jsonData['trains'])
 
 
 @app.route('/logout')
@@ -176,8 +163,8 @@ def openJson(jsonFile):
     return jsonData
 
 
-def writeToJson(jsonFile, dataJson):
-    dataJson = json.dumps(dataJson, indent=3)
+def writeToJson(jsonFile,dataJson):
+    dataJson = json.dumps(dataJson,indent=3)
     with open(jsonFile, 'w') as dataFile:
         dataFile.write(dataJson)
 
@@ -204,11 +191,12 @@ def trainoccupiestrack(trackStatusOne, trackStatusTwo, jsonData):
                 trackStatusTwo = 'Occupied'
                 jsonData['trackTwoStatus'] = trackStatusTwo
             elif (train['track'] == '1' and trackStatusOne == 'Occupied') or (
-                    train['track'] == '2' and trackStatusTwo == 'Occupied'):
+                    train['track'] == '2' and trackStatustwo == 'Occupied'):
                 if train['tracktoken'] == '0':
                     trainTimeObj += timedelta(minutes=5)
                     newtime = trainTimeObj.strftime("%H:%M")
                     train['time'] = newtime
+
     return jsonData
 
 
@@ -219,9 +207,9 @@ def sortTimeTable(trainList):
     now = datetime.now()
     curTime = now.strftime("%H:%M")
     tempTrainList = sorted(trainList, key=lambda x: (x['time'] >= curTime, x['time']))
-    trainList = tempTrainList.copy()
+    trainList= tempTrainList.copy()
     for train in trainList:
-        if train['time'] > curTime:
+        if train['time']>curTime:
             break
         else:
             tempTrainList.append(train)
