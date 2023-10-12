@@ -60,10 +60,6 @@ class TrainStation(ctk.CTk):
         self.timetable_data = []
         self.track_data = []
 
-        self.add_data_timetable(["Train 2", "Track 1", "11:00"])
-        self.add_data_timetable(["Train 1", "Track 1", "11:00"])
-        self.remove_data_timetable(0)
-
         self.update_data_tracks(2, "red")
 
     def create_timetable_layout(self):
@@ -178,7 +174,7 @@ def modbus_client_thread(modbus_data_queue) -> None:
         _logger.info("Connected to server")
 
         # Write confirmation to server that we are active
-        client.write_register(datastore_size - 2, 1, slave=1)
+        await client.write_register(datastore_size - 2, 1, slave=1)
         _logger.debug("Wrote confirmation to server")
 
     async def read_holding_register() -> None:

@@ -9,7 +9,6 @@ from datetime import datetime, timedelta
 import asyncio
 import threading
 import logging
-import socket
 from bisect import bisect_right, bisect_left
 from queue import Queue
 
@@ -116,6 +115,9 @@ def plcPage(change=None):
                         trackStatusOne = trackStatus[0]
                         jsonData['trackOneStatus'] = trackStatus[0]
 
+                    data = ["t", 1, jsonData["trackOneStatus"]]
+                    modbus_data_queue.put(data)
+
                 case "track2":
                     if trackStatusTwo == trackStatus[0]:
                         trackStatusTwo = trackStatus[1]
@@ -124,6 +126,9 @@ def plcPage(change=None):
                         trackStatusTwo = trackStatus[0]
                         jsonData['trackTwoStatus'] = trackStatus[0]
 
+                    data = ["T", 2, jsonData["trackTwoStatus"]]
+                    modbus_data_queue.put(data)
+
                 case "addTimeForm":
                     change = "addTimeForm"
 
@@ -131,18 +136,29 @@ def plcPage(change=None):
                     change = "deleteTimeForm"
 
                 case "addNewTime":
-                    trainData = {'trackToken': "0",
+                    trainData = {
                                  'trainNumber': request.form.get('trainNumber', False),
                                  'time': request.form.get('departure', False),
                                  'track': request.form.get('tracktype', False)}
+
+                    data = trainData.copy()
+                    trainData['tracktoken'] = '0'
+
+                    temp = insert_timetable(jsonData['trains'], trainData)
+                    jsonData['trains'] = temp[0]
                     jsonData['trains'].append(trainData)
                     jsonData['trains'] = sortTimeTable(jsonData['trains'])
                     jsonData = trainoccupiestrack(trackStatusOne, trackStatusTwo, jsonData)
+                    data = ["A"] + [temp[1]] + list(data.values())
+
+                    modbus_data_queue.put(data)
 
                 case "deleteTime":
                     id = int(request.form.get('id', False))
                     if id <= len(jsonData['trains']):
                         jsonData['trains'].pop(id - 1)
+                        data = ["R"] + [id - 1]
+                        modbus_data_queue.put(data)
 
         writeToJson('data.json', jsonData)
 
@@ -253,7 +269,7 @@ async def modbus_server_thread(context: ModbusServerContext) -> None:
     # ssl_context = ssl.create_default_context()
     # ssl_context.load_cert_chain(certfile="cert.perm", keyfile="key.perm")  # change to file path
     address = ("localhost", modbus_port)  # change to correct port
-    _logger.info(f"Server is listening on {socket.gethostbyname(socket.gethostname())}:{modbus_port}")
+    _logger.info(f"Server is listening on {"localhost"}:{modbus_port}")
 
     await StartAsyncTlsServer(
         context=context,
