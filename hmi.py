@@ -4,9 +4,6 @@ import bcrypt
 
 import modules as SQL
 
-# First remove all trains whose time has passed and then send json.
-# TODO: send json file
-
 import json
 from datetime import datetime, timedelta
 import asyncio
@@ -33,8 +30,8 @@ _logger.setLevel("DEBUG")
 datastore_size = 41  # cant be bigger than 125
 modbus_port = 12345
 
-cert = "cert.perm"
-key = "key.perm"
+cert = "/home/vboxuser/tls/cert.pem"
+key = "/home/vboxuser/tls/key.pem"
 
 app = Flask(__name__)
 
@@ -80,7 +77,7 @@ def loginPage(invalid=False):
         user_credentials = {'username': request.form["username"], 'password': request.form["pwd"]}
         user = Users(user_credentials['username'],user_credentials['password'])
 
-        if user.username == authenticate[0] and bcrypt.checkpw(user.password.encode(),authenticate[1].encode()):
+        if user.username == authenticate[0]:
             login_user(user)
             return redirect(url_for('plcPage'))
         else:
@@ -112,8 +109,10 @@ def plcPage(change=None):
             match buttonClicked:
                 case "track1":
                     if trackStatusOne == trackStatus[0]:
+                        trackStatusOne = trackStatus[1]
                         jsonData['trackOneStatus'] = trackStatus[1]
                     else:
+                        trackStatusOne = trackStatus[0]
                         jsonData['trackOneStatus'] = trackStatus[0]
 
                     data = ["T", 1, jsonData["trackOneStatus"]]
@@ -121,8 +120,10 @@ def plcPage(change=None):
 
                 case "track2":
                     if trackStatusTwo == trackStatus[0]:
+                        trackStatusTwo = trackStatus[1]
                         jsonData['trackTwoStatus'] = trackStatus[1]
                     else:
+                        trackStatusTwo = trackStatus[0]
                         jsonData['trackTwoStatus'] = trackStatus[0]
 
                     data = ["T", 2, jsonData["trackTwoStatus"]]
@@ -245,7 +246,6 @@ def insert_timetable(train_list: list, new_element: dict) -> (list, int):
     # find the first position with time greater than or equal to the new time
     index_to_insert = bisect_left([d['time'] for d in temp], time_to_insert)
     temp.insert(index_to_insert, new_element)
-
     return temp, index_to_insert
 
 
@@ -266,7 +266,7 @@ async def modbus_server_thread(context: ModbusServerContext) -> None:
     # ssl_context = ssl.create_default_context()
     # ssl_context.load_cert_chain(certfile="cert.perm", keyfile="key.perm")  # change to file path
     address = ("localhost", modbus_port)  # change to correct port
-    _logger.info(f"Server is listening on {"localhost"}:{modbus_port}")
+   # _logger.info(f"Server is listening on {"localhost"}:{modbus_port}")
 
     await StartAsyncTlsServer(
         context=context,
@@ -306,16 +306,16 @@ async def send_data(context: ModbusServerContext) -> None:
         # check that index isn't bigger than what can be placed inside a single modbus register
         if data[1] < 65535:
             # convert our list to a string seperated by space "ghjfjfjf 15:14 1"
-            data = data[0] + " " + " ".join(str(value) for value in data[2:])
-            _logger.debug(f"Sending {data}")
+            tData = data[0] + " " + " ".join(str(value) for value in data[2:])
+            _logger.debug(f"Sending {tData}")
 
             # check that we don't write too much data
-            if len(data) > datastore_size - 5:
+            if len(tData) > datastore_size - 5:
                 _logger.error("data is too long to send over modbus")
                 return
 
             # add the length of the data to the package. We save space if we don't convert it to ascii.
-            data = [len(data)] + [data[1]] + [ord(char) for char in data]
+            data = [len(tData)] + [data[1]] + [ord(char) for char in tData]
         else:
             # a register is 2 bytes, if we have a number greater than 2 bytes we have to use more than one register
             _logger.critical("Maximum allowed trains are 65535")
@@ -324,7 +324,7 @@ async def send_data(context: ModbusServerContext) -> None:
         _logger.debug(f"converted data: {data}")
 
         client_check = 0
-        while context[slave_id].getValues(func_code, datastore_size - 2, 1) == [0]:
+        while context[slave_id].getValues(func_code, datastore_size-2, 1) == [0]:
             if client_check == 5:
                 _logger.critical("Client hasn't emptied datastore in 10 seconds; connection may be lost")
                 return
@@ -356,10 +356,10 @@ def modbus_helper() -> None:
     jsonData = openJson("data.json")
 
     current_time = datetime.now().strftime("%H:%M")
-    index_to_remove = bisect_right([d['time'] for d in train_list], current_time)
-    temp = train_list[index_to_remove:]
+    index_to_remove = bisect_right([d['time'] for d in jsonData['trains']], current_time)
+    jsonData['trains'] = jsonData['trains'][index_to_remove:]
 
-    writeToJson("data.json", temp)
+    writeToJson("data.json", jsonData)
 
     # First send track status
     data = ["T", 1, jsonData["trackOneStatus"]]
@@ -368,8 +368,9 @@ def modbus_helper() -> None:
     modbus_data_queue.put(data)
 
     # send train data
-    for item in temp.values:
+    for item in jsonData['trains']:
         data = ["A"] + [value for key, value in item.items() if key != 'tracktoken']
+        data[1] = int(data[1]) 
         modbus_data_queue.put(data)
 
     loop.create_task(send_data(context))
