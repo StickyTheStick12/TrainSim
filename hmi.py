@@ -4,6 +4,9 @@ import bcrypt
 
 import modules as SQL
 
+# First remove all trains whose time has passed and then send json.
+# TODO: send json file
+
 import json
 from datetime import datetime, timedelta
 import asyncio
@@ -109,21 +112,17 @@ def plcPage(change=None):
             match buttonClicked:
                 case "track1":
                     if trackStatusOne == trackStatus[0]:
-                        trackStatusOne = trackStatus[1]
                         jsonData['trackOneStatus'] = trackStatus[1]
                     else:
-                        trackStatusOne = trackStatus[0]
                         jsonData['trackOneStatus'] = trackStatus[0]
 
-                    data = ["t", 1, jsonData["trackOneStatus"]]
+                    data = ["T", 1, jsonData["trackOneStatus"]]
                     modbus_data_queue.put(data)
 
                 case "track2":
                     if trackStatusTwo == trackStatus[0]:
-                        trackStatusTwo = trackStatus[1]
                         jsonData['trackTwoStatus'] = trackStatus[1]
                     else:
-                        trackStatusTwo = trackStatus[0]
                         jsonData['trackTwoStatus'] = trackStatus[0]
 
                     data = ["T", 2, jsonData["trackTwoStatus"]]
@@ -146,8 +145,6 @@ def plcPage(change=None):
 
                     temp = insert_timetable(jsonData['trains'], trainData)
                     jsonData['trains'] = temp[0]
-                    jsonData['trains'].append(trainData)
-                    jsonData['trains'] = sortTimeTable(jsonData['trains'])
                     jsonData = trainoccupiestrack(trackStatusOne, trackStatusTwo, jsonData)
                     data = ["A"] + [temp[1]] + list(data.values())
 
@@ -327,7 +324,7 @@ async def send_data(context: ModbusServerContext) -> None:
         _logger.debug(f"converted data: {data}")
 
         client_check = 0
-        while context[slave_id].getValues(func_code, datastore_size - 2, 1) == 0:
+        while context[slave_id].getValues(func_code, datastore_size - 2, 1) == [0]:
             if client_check == 5:
                 _logger.critical("Client hasn't emptied datastore in 10 seconds; connection may be lost")
                 return
@@ -355,6 +352,26 @@ def modbus_helper() -> None:
     """Helps start modbus from a new thread"""
     loop = asyncio.new_event_loop()
     context = setup_server()
+
+    jsonData = openJson("data.json")
+
+    current_time = datetime.now().strftime("%H:%M")
+    index_to_remove = bisect_right([d['time'] for d in train_list], current_time)
+    temp = train_list[index_to_remove:]
+
+    writeToJson("data.json", temp)
+
+    # First send track status
+    data = ["T", 1, jsonData["trackOneStatus"]]
+    modbus_data_queue.put(data)
+    data = ["T", 2, jsonData["trackTwoStatus"]]
+    modbus_data_queue.put(data)
+
+    # send train data
+    for item in temp.values:
+        data = ["A"] + [value for key, value in item.items() if key != 'tracktoken']
+        modbus_data_queue.put(data)
+
     loop.create_task(send_data(context))
     loop.run_until_complete(modbus_server_thread(context))
     _logger.info("Exiting modbus thread")
@@ -366,7 +383,7 @@ if __name__ == '__main__':
     modbus_thread = threading.Thread(target=modbus_helper)
     modbus_thread.start()
 
-    app.run(ssl_context=(cert, key), debug=True, port="5001")
+    app.run(ssl_context=(cert, key), debug=False, port="5001")
     SQL.closeSession()
 
     modbus_thread.join()
