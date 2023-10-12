@@ -198,7 +198,7 @@ def trainoccupiestrack(trackStatusOne, trackStatusTwo, jsonData):
             if train['track'] == '1' and trackStatusOne == 'Available':
                 train['tracktoken'] = '1'
                 trackStatusOne = 'Occupied'
-                jsonData['trackOnestatus'] = trackStatusOne
+                jsonData['trackOneStatus'] = trackStatusOne
             elif train['track'] == '2' and trackStatusTwo == 'Available':
                 train['tracktoken'] = '2'
                 trackStatusTwo = 'Occupied'
@@ -292,60 +292,58 @@ def setup_server() -> ModbusServerContext:
 
 async def send_data(context: ModbusServerContext) -> None:
     """Takes data from queue and sends to client"""
+    loop = asyncio.get_event_loop()
+
     while True:
-        if not modbus_data_queue.empty():
-            # don't block if no data is available
-            data = modbus_data_queue.get_nowait()
+        # Run blocking call in executor so the server can respond to the client requests
+        data = await loop.run_in_executor(None, modbus_data_queue.get)
 
-            func_code = 3  # function code for modbus that we want to read and write data from holding register
-            slave_id = 0x00  # we broadcast the data to all the connected slaves
-            address = 0x00  # the address to where to holding register are, i.e the start address in our case but we can write in the middle too
+        func_code = 3  # function code for modbus that we want to read and write data from holding register
+        slave_id = 0x00  # we broadcast the data to all the connected slaves
+        address = 0x00  # the address to where to holding register are, i.e the start address in our case but we can write in the middle too
 
-            # check that index isn't bigger than what can be placed inside modbus
-            if data[1] < 65535:
-                # convert our list to a string seperated by space "ghjfjfjf 15:14 1"
-                data = data[0] + " " + " ".join(str(value) for value in data[2:])
-                _logger.debug(f"Sending {data}")
+        # check that index isn't bigger than what can be placed inside modbus
+        if data[1] < 65535:
+            # convert our list to a string seperated by space "ghjfjfjf 15:14 1"
+            data = data[0] + " " + " ".join(str(value) for value in data[2:])
+            _logger.debug(f"Sending {data}")
 
-                # check that we don't write too much data
-                if len(data) > datastore_size - 5:
-                    _logger.error("data is too long to send over modbus")
-                    return
-
-                # add the length of the data to the package. We save space if we don't convert it to ascii.
-                data = [len(data)] + [data[1]] + [ord(char) for char in data]
-            else:
-                _logger.critical("Maximum allowed trains are 65535")
+            # check that we don't write too much data
+            if len(data) > datastore_size - 5:
+                _logger.error("data is too long to send over modbus")
                 return
 
-            _logger.debug(f"converted data: {data}")
+            # add the length of the data to the package. We save space if we don't convert it to ascii.
+            data = [len(data)] + [data[1]] + [ord(char) for char in data]
+        else:
+            _logger.critical("Maximum allowed trains are 65535")
+            return
 
-            client_check = 0
-            while context[slave_id].getValues(func_code, datastore_size - 2, 1) == 0:
-                if client_check == 5:
-                    _logger.critical("Client hasn't emptied datastore in 10 seconds; connection may be lost")
-                    return
-                client_check += 1
-                _logger.debug("Waiting for client to copy datastore; sleeping 2 second")
-                await asyncio.sleep(2)  # give the server control so it can answer the client
+        _logger.debug(f"converted data: {data}")
 
-            _logger.debug("Client has read data from datastore, writing new data")
-            context[slave_id].setValues(func_code, address, data)
+        client_check = 0
+        while context[slave_id].getValues(func_code, datastore_size - 2, 1) == 0:
+            if client_check == 5:
+                _logger.critical("Client hasn't emptied datastore in 10 seconds; connection may be lost")
+                return
+            client_check += 1
+            _logger.debug("Waiting for client to copy datastore; sleeping 2 second")
+            await asyncio.sleep(2)  # give the server control so it can answer the client
 
-            _logger.debug("Resetting flag")
-            context[slave_id].setValues(func_code, datastore_size - 2, [0])
+        _logger.debug("Client has read data from datastore, writing new data")
+        context[slave_id].setValues(func_code, address, data)
 
-            # for value in data:
-            #    context[slave_id].setValues(func_code, address, value)
-            #    address += 1
+        _logger.debug("Resetting flag")
+        context[slave_id].setValues(func_code, datastore_size - 2, [0])
 
-            # server starting with flag 0
-            # client connects and changes it to a 1
-            # server writes a 0 to the flag when it writes a new value
-            # client polls the flag for a 0 and when it finds that it will read the holding register and change it to a 1
+        # for value in data:
+        #    context[slave_id].setValues(func_code, address, value)
+        #    address += 1
 
-        # give the control to the server so it can send data
-        await asyncio.sleep(1)
+        # server starting with flag 0
+        # client connects and changes it to a 1
+        # server writes a 0 to the flag when it writes a new value
+        # client polls the flag for a 0 and when it finds that it will read the holding register and change it to a 1
 
 
 def modbus_helper() -> None:
@@ -354,6 +352,7 @@ def modbus_helper() -> None:
     context = setup_server()
     loop.create_task(send_data(context))
     loop.run_until_complete(modbus_server_thread(context))
+    _logger.info("Exiting modbus thread")
 
 
 if __name__ == '__main__':

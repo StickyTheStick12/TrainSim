@@ -26,37 +26,40 @@ class TrainStation(ctk.CTk):
     def __init__(self):
         super().__init__()
         ctk.set_appearance_mode("dark")
-        self.geometry("800x800")
+        self.geometry("900x700")
         self.title("Train station")
-
-        for x in range(5):
-            self.grid_columnconfigure(x, weight=1)
-            self.grid_rowconfigure(x, weight=1)
 
         self.title_font = ctk.CTkFont(size=24)
         self.subtitle_font = ctk.CTkFont(size=20)
         self.text_font = ctk.CTkFont(size=14)
 
+        self.grid_columnconfigure(0, weight=1)
+        self.grid_columnconfigure(1, weight=1)
+        self.grid_rowconfigure(0, weight=1)
+
         self.timetable_frame = ctk.CTkFrame(self, fg_color="blue")
         self.timetable_frame.grid(row=0, column=0, sticky="nsew")
+        self.timetable_frame.grid_columnconfigure(0, weight=1)
+        self.timetable_frame.grid_columnconfigure(1, weight=1)
+        self.timetable_frame.grid_columnconfigure(2, weight=1)
+        self.timetable_frame.grid_rowconfigure(0, weight=1)
+        self.timetable_frame.grid_rowconfigure(1, weight=1)
+
+        timetable_label = ctk.CTkLabel(self.timetable_frame, text="Timetable", font=self.title_font,
+                                       corner_radius=6)
+        train_label = ctk.CTkLabel(self.timetable_frame, text="Train", font=self.subtitle_font, corner_radius=3)
+        track_label = ctk.CTkLabel(self.timetable_frame, text="Track", font=self.subtitle_font, corner_radius=3)
+        departure_label = ctk.CTkLabel(self.timetable_frame, text="Departure", font=self.subtitle_font, corner_radius=3)
+
+        timetable_label.grid(row=0, column=0, columnspan=3, sticky="n", pady=20)
+        train_label.grid(row=1, column=0, sticky="n")
+        track_label.grid(row=1, column=1, sticky="n")
+        departure_label.grid(row=1, column=2, sticky="n")
 
         self.tracks_frame = ctk.CTkFrame(self, fg_color="pink")
         self.tracks_frame.grid(row=0, column=1, sticky="nsew")
-
-        self.timetable_data = []
-        self.track_data = []
-
-        self.track1_indicator = ctk.CTkCanvas(self.tracks_frame, bg="green", width=100, height=50, highlightthickness=0)
-        self.track2_indicator = ctk.CTkCanvas(self.tracks_frame, bg="green", width=100, height=50, highlightthickness=0)
-
-        self.create_timetable_layout()
-        self.create_track_layout()
-
-        self.add_data_timetable(0, ["Train 2", "Track 1", "11:00"])
-        self.add_data_timetable(1, ["Train 1", "Track 1", "11:00"])
-        self.remove_data_timetable(0)
-
-        self.update_data_tracks(2, "Occupied")
+        self.tracks_frame.grid_columnconfigure(0, weight=1)
+        self.tracks_frame.grid_rowconfigure(0, weight=1)
 
     def create_timetable_layout(self):
         timetable_label = ctk.CTkLabel(self.timetable_frame, text="Timetable", font=self.title_font,
@@ -82,6 +85,7 @@ class TrainStation(ctk.CTk):
         self.track2_indicator.grid(row=1, column=4, columnspan=1, padx=50, pady=20)
 
     def add_data_timetable(self, index, data):
+        data[1], data[2] = data[2], data[1]
         self.timetable_data.insert(index, data)
         current_row = len(self.timetable_data)
         train_label = ctk.CTkLabel(self.timetable_frame, text=data[0], font=self.text_font)
@@ -122,14 +126,15 @@ class TrainStation(ctk.CTk):
         else:
             track_status.config(bg="green")
 
-
     def process_modbus_data(self) -> None:
         if not modbus_data_queue.empty():
+            # Don't block this thread if no data is available
             data = modbus_data_queue.get_nowait()
 
             match data[1]:
                 case "A":
-                    train_station_hmi.add_train_to_timetable(int(data[0]), data[2:]) # 1, [(Train)'1', '09:00', (Track)'1'])
+                    train_station_hmi.add_train_to_timetable(int(data[0]),
+                                                             data[2:])  # 1, [(Train)'1', '09:00', (Track)'1'])
                 case "R":
                     train_station_hmi.remove_train_from_timetable(int(data[0]))
                 case "T":
@@ -170,7 +175,7 @@ def modbus_client_thread(queue) -> None:
         _logger.info("Connected to server")
 
         # Write confirmation to server that we are active
-        await client.write_register(datastore_size-2, 1, slave=1)
+        await client.write_register(datastore_size - 2, 1, slave=1)
         _logger.debug("Wrote confirmation to server")
 
     async def read_holding_register() -> None:
@@ -179,19 +184,20 @@ def modbus_client_thread(queue) -> None:
         try:
             while True:
                 # poll the flag bit to see if new information has been written
-                hold_register = await client.read_holding_registers(datastore_size-2, 1, slave=1)
+                hold_register = await client.read_holding_registers(datastore_size - 2, 1, slave=1)
                 if hold_register.registers == [0]:
                     _logger.debug("New information available")
-                    hold_register = await client.read_holding_registers(0x00, datastore_size-3, slave=1)
+                    hold_register = await client.read_holding_registers(0x00, datastore_size - 3, slave=1)
 
                     if not hold_register.isError():
                         # 10 1 A gffff 15:15 1
                         amount_to_read = hold_register.registers[0]
                         idx = hold_register.registers[1]
-                        data = [idx] + "".join([chr(char) for char in hold_register.registers[2:2+amount_to_read]]).split(" ")
+                        data = [idx] + "".join(
+                            [chr(char) for char in hold_register.registers[2:2 + amount_to_read]]).split(" ")
                         _logger.debug(f"received {data}")
                         _logger.debug("Resetting flag")
-                        client.write_register(datastore_size-2, 1, slave=1)
+                        client.write_register(datastore_size - 2, 1, slave=1)
 
                         # put data in queue for the GUI thread
                         queue.put(data)
@@ -212,10 +218,11 @@ def modbus_client_thread(queue) -> None:
     loop.run_until_complete(run_client())
     loop.run_until_complete(read_holding_register())
 
+
 if __name__ == "__main__":
     modbus_data_queue = Queue()
 
-    modbus_thread = threading.Thread(target=modbus_client_thread, args=(modbus_data_queue, ))
+    modbus_thread = threading.Thread(target=modbus_client_thread, args=(modbus_data_queue,))
     modbus_thread.start()
     # Initialize the Train Station HMI
     train_station_hmi = TrainStation()
