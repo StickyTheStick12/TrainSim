@@ -1,0 +1,35 @@
+{% extends "base.html"%} 
+{% block title %} Login page{% endblock %} 
+{% block css %}    
+<link
+rel="stylesheet"
+type="text/css"
+href="{{ url_for('static', filename='style.css')}}"
+/> 
+{% endblock %}
+
+{%block content %}
+<div class="header"> 
+    <h1>Train Station System Control</h1>
+    <h2>Sign in</h2>
+    {% if invalid %}
+        <div class="invalid-pwd-usr">
+            <p>Wrong Credentials</p>
+            <p class="smaller-p">Invalid username or password</p>
+
+        </div>
+    {% endif %}
+</div>
+
+<div class="inputCred">
+    <form action="#" method="POST">
+        <label for="username" >Username</label><br>
+        <input type="text" name="username" autocomplete="off"><br>
+        <label for="pwd">Password</label><br>
+        <input type="password" name="pwd"><br><br>
+        <button type="submit">Log in</button>
+    </form> 
+        
+</div>
+
+{% endblock %}
