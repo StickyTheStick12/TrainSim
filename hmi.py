@@ -351,6 +351,6 @@ if __name__ == '__main__':
     modbus_thread.start()
 
     app.run(ssl_context=(cert, key), debug=True, port="5001")
-    closeSession()
+    SQL.closeSession()
 
     modbus_thread.join()
