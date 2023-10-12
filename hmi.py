@@ -248,35 +248,6 @@ def insert_timetable(train_list: list, new_element: dict) -> (list, int):
     return temp, index_to_insert
 
 
-def trainoccupiestrack(trackStatusOne, trackStatusTwo, jsonData):
-    #sets all train tokens to 0 then gives train tokens to the next train thats arriving at the station or the train at the station so it doesnt update its own time
-    timeFormat = "%H:%M"
-    now = datetime.now()
-    curTime = now.strftime(timeFormat)
-    curTimeObj = now.strptime(curTime,timeFormat)
-    trackStatusOne = 'Available'
-    trackStatusTwo = 'Available'
-    for train in jsonData['trains']:
-        train['tracktoken'] = '0'
-    for train in jsonData['trains']:
-        trainTimeObj = datetime.strptime(train['time'],timeFormat)
-        if train['time'] >= curTime and trainTimeObj-timedelta(minutes=5) <= curTimeObj:
-            if train['track'] == '1' and trackStatusOne == 'Available':
-                train['tracktoken'] = '1'
-                trackStatusOne = 'Occupied'
-                jsonData['trackOnestatus'] = trackStatusOne
-            elif train['track'] == '2' and trackStatusTwo == 'Available':
-                train['tracktoken'] = '2'
-                trackStatusTwo = 'Occupied'
-                jsonData['trackTwoStatus'] = trackStatusTwo
-            elif (train['track'] == '1' and trackStatusOne == 'Occupied') or (train['track'] == '2' and trackStatusTwo == 'Occupied'):
-                if train['tracktoken'] == '0':
-                    trainTimeObj += timedelta(minutes=5)
-                    newtime = trainTimeObj.strftime("%H:%M")
-                    train['time'] = newtime
-    return jsonData
-
-
 async def modbus_server_thread(context: ModbusServerContext) -> None:
     """Creates the server that will listen at localhost"""
 
