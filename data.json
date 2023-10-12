@@ -1,0 +1,24 @@
+{
+   "trackOneStatus": "Occupied",
+   "trackTwoStatus": "Occupied",
+   "trackStatus": [
+      "Available",
+      "Occupied"
+   ],
+   "trains": [
+      {
+         "trackToken": "0",
+         "trainNumber": "t\u00e5g",
+         "time": "10:02",
+         "track": "1",
+         "tracktoken": "1"
+      },
+      {
+         "trackToken": "0",
+         "trainNumber": "simon",
+         "time": "10:03",
+         "track": "2",
+         "tracktoken": "2"
+      }
+   ]
+}
