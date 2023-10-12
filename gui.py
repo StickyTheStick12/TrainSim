@@ -132,9 +132,9 @@ class TrainStation(ctk.CTk):
                 case "A":
                     self.add_data_timetable(int(data[0]), data[2:])  # (index)1, [(Train)'1', '09:00', (Track)'1'])
                 case "R":
-                    train_station_hmi.remove_data_timetable(int(data[0]))  # (index) 1
+                    self.remove_data_timetable(int(data[0]))  # (index) 1
                 case "T":
-                    train_station_hmi.update_data_tracks(int(data[0]), data[2])  # (track) 1, (status) "occupied"
+                    self.update_data_tracks(int(data[0]), data[2])  # (track) 1, (status) "occupied"
 
         self.after(1000, self.process_modbus_data)
 
