@@ -10,12 +10,12 @@ from queue import Queue
 
 logging.basicConfig()
 _logger = logging.getLogger(__file__)
-_logger.setLevel("WARNING")
+_logger.setLevel("DEBUG")
 
 # Modbus variables
 datastore_size = 41  # needs to be the same size as the server, max 125 though
-path_to_cert = "cert.pem"
-path_to_key = "key.pem"
+path_to_cert = "/home/vboxuser/tls/cert.pem"
+path_to_key = "/home/vboxuser/tls/key.pem"
 host = "localhost"
 port = 12345
 
