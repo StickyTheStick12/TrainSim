@@ -1,11 +1,11 @@
-Dependencies:
+Dependencies:                                          
 bcrypt 4.0.1,                                          
 flask 2.3.3,                             
-flask login 0.6.2
-flask talisman 1.1.0
-mysql
-pymodbus
-customtkinter
+flask login 0.6.2                                          
+flask talisman 1.1.0                                          
+mysql                                          
+pymodbus                                          
+customtkinter                                          
 
 To run the simulation you have to run GUI.py before HMI.py. The GUI.py will log an warning every second until the HMI comes online but isn't anything to worry about.
 
