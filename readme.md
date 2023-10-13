@@ -1,5 +1,5 @@
 Dependencies:
-bcrypt 4.0.1 \n
+bcrypt 4.0.1 /n
 flask 2.3.3 \n
 flask login 0.6.2
 flask talisman 1.1.0
