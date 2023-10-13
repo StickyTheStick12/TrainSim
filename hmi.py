@@ -367,10 +367,12 @@ def modbus_helper() -> None:
     data = ["T", 2, jsonData["trackTwoStatus"]]
     modbus_data_queue.put(data)
 
+    idx = 0
+    
     # send train data
     for item in jsonData['trains']:
-        data = ["A"] + [value for key, value in item.items() if key != 'tracktoken']
-        data[1] = int(data[1]) 
+        data = ["A"] + [idx] + [value for key, value in item.items() if key != 'tracktoken']
+        idx += 1
         modbus_data_queue.put(data)
 
     loop.create_task(send_data(context))
