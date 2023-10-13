@@ -7,7 +7,7 @@ mysql
 pymodbus                                          
 customtkinter                                          
 
-To run the simulation you have to run GUI.py before HMI.py. The GUI.py will log an warning every second until the HMI comes online but isn't anything to worry about.
+To run the simulation you have to run GUI.py before HMI.py. The GUI.py will log an warning every second until the HMI comes online but isn't anything to worry about. Don't forget to change to correct tls path in the GUI and HMI files.
 
 **Good to know:**
 * The modbus server currently only supports 65535 trains simultaneously. 
