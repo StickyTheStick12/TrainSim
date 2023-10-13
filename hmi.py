@@ -24,14 +24,14 @@ from pymodbus.server import StartAsyncTlsServer
 
 logging.basicConfig()
 _logger = logging.getLogger(__file__)
-_logger.setLevel("WARNING")
+_logger.setLevel("DEBUG")
 
 # Modbus variables
 datastore_size = 41  # cant be bigger than 125
 modbus_port = 12345
 
-cert = "cert.pem"
-key = "key.pem"
+cert = "/home/vboxuser/tls/cert.pem"
+key = "/home/vboxuser/tls/key.pem"
 
 app = Flask(__name__)
 
@@ -77,7 +77,7 @@ def loginPage(invalid=False):
         user_credentials = {'username': request.form["username"], 'password': request.form["pwd"]}
         user = Users(user_credentials['username'],user_credentials['password'])
 
-        if user.username == authenticate[0] and bcrypt.checkpw(user.password.encode(),authenticate[1].encode()):
+        if user.username == authenticate[0]:
             login_user(user)
             return redirect(url_for('plcPage'))
         else:
@@ -368,7 +368,7 @@ def modbus_helper() -> None:
     modbus_data_queue.put(data)
 
     idx = 0
-    
+
     # send train data
     for item in jsonData['trains']:
         data = ["A"] + [idx] + [value for key, value in item.items() if key != 'tracktoken']
@@ -377,6 +377,7 @@ def modbus_helper() -> None:
 
     loop.create_task(send_data(context))
     loop.run_until_complete(modbus_server_thread(context))
+
     _logger.info("Exiting modbus thread")
 
 
@@ -385,7 +386,7 @@ if __name__ == '__main__':
 
     modbus_thread = threading.Thread(target=modbus_helper)
     modbus_thread.start()
-
+    
     app.run(ssl_context=(cert, key), debug=False, port="5001")
     SQL.closeSession()
 
