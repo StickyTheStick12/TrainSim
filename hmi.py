@@ -28,7 +28,7 @@ from pymodbus.server import StartAsyncTlsServer
 
 logging.basicConfig()
 _logger = logging.getLogger(__file__)
-_logger.setLevel("WARNING")
+_logger.setLevel("DEBUG")
 
 # Modbus variables
 datastore_size = 41  # cant be bigger than 125
@@ -344,6 +344,7 @@ async def send_data(context: ModbusServerContext) -> None:
         while context[slave_id].getValues(func_code, datastore_size - 2, 1) == [0]:
             _logger.info("Waiting for client to connect; sleeping 2 second")
             await asyncio.sleep(2)  # give the server control so it can answer the client
+            _logger.debug("Client has connected")
 
         restart = False
 
@@ -380,7 +381,7 @@ async def send_data(context: ModbusServerContext) -> None:
                     restart = True
                     break
                 client_check += 1
-                _logger.info("Waiting for client to copy datastore; sleeping 2 second")
+                _logger.debug("Waiting for client to copy datastore; sleeping 2 second")
                 await asyncio.sleep(2)  # give the server control so it can answer the client
 
             if not restart:
