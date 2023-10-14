@@ -43,7 +43,7 @@ login_manager = LoginManager()
 login_manager.init_app(app)
 
 mutex = threading.Lock()
-exit_event = asyncio.Event()
+exit_event = threading.Event()
 
 
 class Users(UserMixin):
@@ -408,7 +408,8 @@ async def modbus_helper() -> None:
     task_send_data = loop.create_task(send_data(context))
     task_server = loop.create_task(modbus_server_thread(context))
 
-    await exit_event.wait()
+    while not exit_event.is_set():
+        await asyncio.sleep(5):
 
     task_send_data.cancel()
     task_server.cancel()
