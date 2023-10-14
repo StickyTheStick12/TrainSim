@@ -402,13 +402,14 @@ def modbus_helper() -> None:
     loop = asyncio.new_event_loop()
     context = setup_server()
 
-    task = loop.create_task(send_data(context))
+    task_send_data = loop.create_task(send_data(context))
+    task_server = loop.create_task(modbus_server_thread(context))
 
     try:
-        loop.run_until_complete(modbus_server_thread(context))
+        loop.run_until_complete(asyncio.gather(task_send_data, task_server))
     except KeyboardInterrupt:
-        task.cancel()
-        _logger.warning("Exiting modbus thread")
+        loop.run_until_complete(loop.shutdown_asyncgens())
+        loop.close()
         return
 
 
