@@ -24,14 +24,14 @@ from pymodbus.server import StartAsyncTlsServer
 
 logging.basicConfig()
 _logger = logging.getLogger(__file__)
-_logger.setLevel("DEBUG")
+_logger.setLevel("WARNING")
 
 # Modbus variables
 datastore_size = 41  # cant be bigger than 125
 modbus_port = 12345
 
-cert = "cert.perm"
-key = "key.perm"
+cert = "/home/vboxuser/tls/cert.pem"
+key = "/home/vboxuser/tls/key.pem"
 
 app = Flask(__name__)
 
@@ -77,13 +77,12 @@ def loginPage(invalid=False):
         user_credentials = {'username': request.form["username"], 'password': request.form["pwd"]}
         user = Users(user_credentials['username'],user_credentials['password'])
 
-        if user.username == authenticate[0] and bcrypt.checkpw(user.password.encode(),authenticate[1].encode()):
+        if user.username == authenticate[0] and user.password == authenticate[1]:
             login_user(user)
             return redirect(url_for('plcPage'))
         else:
             invalid=True
             return render_template("login.html",invalid=invalid)
-
 
     return render_template("login.html",invalid=invalid)
 
@@ -115,7 +114,7 @@ def plcPage(change=None):
                         trackStatusOne = trackStatus[0]
                         jsonData['trackOneStatus'] = trackStatus[0]
 
-                    data = ["t", 1, jsonData["trackOneStatus"]]
+                    data = ["T", 1, jsonData["trackOneStatus"]]
                     modbus_data_queue.put(data)
 
                 case "track2":
@@ -146,8 +145,6 @@ def plcPage(change=None):
 
                     temp = insert_timetable(jsonData['trains'], trainData)
                     jsonData['trains'] = temp[0]
-                    jsonData['trains'].append(trainData)
-                    jsonData['trains'] = sortTimeTable(jsonData['trains'])
                     jsonData = trainoccupiestrack(trackStatusOne, trackStatusTwo, jsonData)
                     data = ["A"] + [temp[1]] + list(data.values())
 
@@ -186,7 +183,8 @@ def writeToJson(jsonFile,dataJson):
 
 
 def trainoccupiestrack(trackStatusOne, trackStatusTwo, jsonData):
-    # sets all train tokens to 0 then gives train tokens to the next train thats arriving at the station or the train at the station so it doesnt update its own time
+    # sets all train tokens to 0 then gives train tokens to the next train thats arriving at the station or the train
+    # at the station so it doesnt update its own time
     timeFormat = "%H:%M"
     now = datetime.now()
     curTime = now.strftime(timeFormat)
@@ -243,12 +241,17 @@ def insert_timetable(train_list: list, new_element: dict) -> (list, int):
     # find the last position with time less than the current time
     current_time = datetime.now().strftime("%H:%M")
     index_to_remove = bisect_right([d['time'] for d in train_list], current_time)
+
+    # send message to gui to remove the entries
+    for i in range(1, index_to_remove+1):
+        data = ["R"] + [i]
+        modbus_data_queue.put(data)
+
     temp = train_list[index_to_remove:]
 
     # find the first position with time greater than or equal to the new time
     index_to_insert = bisect_left([d['time'] for d in temp], time_to_insert)
     temp.insert(index_to_insert, new_element)
-
     return temp, index_to_insert
 
 
@@ -269,7 +272,7 @@ async def modbus_server_thread(context: ModbusServerContext) -> None:
     # ssl_context = ssl.create_default_context()
     # ssl_context.load_cert_chain(certfile="cert.perm", keyfile="key.perm")  # change to file path
     address = ("localhost", modbus_port)  # change to correct port
-    _logger.info(f"Server is listening on {"localhost"}:{modbus_port}")
+   # _logger.info(f"Server is listening on {"localhost"}:{modbus_port}")
 
     await StartAsyncTlsServer(
         context=context,
@@ -309,36 +312,36 @@ async def send_data(context: ModbusServerContext) -> None:
         # check that index isn't bigger than what can be placed inside a single modbus register
         if data[1] < 65535:
             # convert our list to a string seperated by space "ghjfjfjf 15:14 1"
-            data = data[0] + " " + " ".join(str(value) for value in data[2:])
-            _logger.debug(f"Sending {data}")
+            tData = data[0] + " " + " ".join(str(value) for value in data[2:])
+            _logger.debug(f"Sending {tData}")
 
             # check that we don't write too much data
-            if len(data) > datastore_size - 5:
+            if len(tData) > datastore_size - 5:
                 _logger.error("data is too long to send over modbus")
                 return
 
             # add the length of the data to the package. We save space if we don't convert it to ascii.
-            data = [len(data)] + [data[1]] + [ord(char) for char in data]
+            data = [len(tData)] + [data[1]] + [ord(char) for char in tData]
         else:
             # a register is 2 bytes, if we have a number greater than 2 bytes we have to use more than one register
-            _logger.critical("Maximum allowed trains are 65535")
+            _logger.error("Maximum allowed trains are 65535")
             return
 
         _logger.debug(f"converted data: {data}")
 
         client_check = 0
-        while context[slave_id].getValues(func_code, datastore_size - 2, 1) == 0:
+        while context[slave_id].getValues(func_code, datastore_size-2, 1) == [0]:
             if client_check == 5:
                 _logger.critical("Client hasn't emptied datastore in 10 seconds; connection may be lost")
                 return
             client_check += 1
-            _logger.debug("Waiting for client to copy datastore; sleeping 2 second")
+            _logger.info("Waiting for client to copy datastore; sleeping 2 second")
             await asyncio.sleep(2)  # give the server control so it can answer the client
 
         _logger.debug("Client has read data from datastore, writing new data")
         context[slave_id].setValues(func_code, address, data)
 
-        _logger.debug("Resetting flag")
+        _logger.info("Resetting flag")
         context[slave_id].setValues(func_code, datastore_size - 2, [0])
 
         # for value in data:
@@ -353,11 +356,50 @@ async def send_data(context: ModbusServerContext) -> None:
 
 def modbus_helper() -> None:
     """Helps start modbus from a new thread"""
+
+    # 1. We acquire a mutex for the json file.
+    # 2. We copy all the data to the queue
+    # 3. we start the server and wait for the client to connect
+    # 4. We start writing data and starting the timer for 10 seconds
+    # 5. if the client hasn't read data in 10 seconds close connection, clear queue, acquire mutex, fill queue
+    # and restart server
+
+    # 1. We start the server
+
+
+    # 1. We start the server as before. We won't write anything to the client until it has connected. The flask
+    # will still work and put data in the queue but the server wont close.
+    # 2.
+
     loop = asyncio.new_event_loop()
     context = setup_server()
+
+    jsonData = openJson("data.json")
+
+    current_time = datetime.now().strftime("%H:%M")
+    index_to_remove = bisect_right([d['time'] for d in jsonData['trains']], current_time)
+    jsonData['trains'] = jsonData['trains'][index_to_remove:]
+
+    writeToJson("data.json", jsonData)
+
+    # First send track status
+    data = ["T", 1, jsonData["trackOneStatus"]]
+    modbus_data_queue.put(data)
+    data = ["T", 2, jsonData["trackTwoStatus"]]
+    modbus_data_queue.put(data)
+
+    idx = 0
+
+    # send train data
+    for item in jsonData['trains']:
+        data = ["A"] + [idx] + [value for key, value in item.items() if key != 'tracktoken']
+        idx += 1
+        modbus_data_queue.put(data)
+
     loop.create_task(send_data(context))
     loop.run_until_complete(modbus_server_thread(context))
-    _logger.info("Exiting modbus thread")
+
+    _logger.warning("Exiting modbus thread")
 
 
 if __name__ == '__main__':
@@ -365,8 +407,8 @@ if __name__ == '__main__':
 
     modbus_thread = threading.Thread(target=modbus_helper)
     modbus_thread.start()
-
-    app.run(ssl_context=(cert, key), debug=True, port="5001")
+    
+    app.run(ssl_context=(cert, key), debug=False, port="5001")
     SQL.closeSession()
 
     modbus_thread.join()
