@@ -400,8 +400,9 @@ async def send_data(context: ModbusServerContext) -> None:
 
 
 async def modbus_helper() -> None:
-    """Helps start modbus from a new thread"""
+    """Sets up server and send data task"""
     loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
     context = setup_server()
 
     task_send_data = loop.create_task(send_data(context))
@@ -416,7 +417,9 @@ async def modbus_helper() -> None:
 
 
 def start_modbus():
-    asyncio.run(modbus_helper)
+    """Helps to start modbus_helper so it runs async"""
+    loop = asyncio.new_event_loop()
+    loop.run_until_complete(modbus_helper())
 
 
 if __name__ == '__main__':
@@ -429,4 +432,3 @@ if __name__ == '__main__':
     exit_event.set()
     SQL.closeSession()
     modbus_thread.join()
-
