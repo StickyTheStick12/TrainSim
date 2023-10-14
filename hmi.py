@@ -373,6 +373,7 @@ async def send_data(context: ModbusServerContext) -> None:
             while context[slave_id].getValues(func_code, datastore_size-2, 1) == [0]:
                 if client_check == 5:
                     _logger.critical("Client hasn't emptied datastore in 10 seconds; connection may be lost")
+                    _logger.info("Restarting server")
                     restart = True
                     break
                 client_check += 1
@@ -411,10 +412,15 @@ def modbus_helper() -> None:
 if __name__ == '__main__':
     modbus_data_queue = Queue()
 
-    modbus_thread = threading.Thread(target=modbus_helper)
-    modbus_thread.start()
-    
-    app.run(ssl_context=(cert, key), debug=False, port="5001")
-    SQL.closeSession()
+    try:
+        modbus_thread = threading.Thread(target=modbus_helper)
+        modbus_thread.start()
 
-    modbus_thread.join()
+        app.run(ssl_context=(cert, key), debug=False, port="5001")
+    except KeyboardInterrupt:
+        _logger.warning("Closing sql")
+        SQL.closeSession()
+        _logger.warning("Joining modbus thread")
+        modbus_thread.join()
+        _logger.warning("Exiting")
+
