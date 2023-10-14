@@ -43,6 +43,8 @@ login_manager = LoginManager()
 login_manager.init_app(app)
 
 mutex = threading.Lock()
+exit_event = asyncio.Event()
+
 
 class Users(UserMixin):
     def __init__(self,username, password,is_active=True):
@@ -397,7 +399,7 @@ async def send_data(context: ModbusServerContext) -> None:
             # client polls the flag for a 0 and when it finds that it will read the holding register and change it to a 1
 
 
-def modbus_helper() -> None:
+async def modbus_helper() -> None:
     """Helps start modbus from a new thread"""
     loop = asyncio.new_event_loop()
     context = setup_server()
@@ -405,21 +407,26 @@ def modbus_helper() -> None:
     task_send_data = loop.create_task(send_data(context))
     task_server = loop.create_task(modbus_server_thread(context))
 
-    try:
-        loop.run_until_complete(asyncio.gather(task_send_data, task_server))
-    except KeyboardInterrupt:
-        loop.run_until_complete(loop.shutdown_asyncgens())
-        loop.close()
-        return
+    await exit_event.wait()
+
+    task_send_data.cancel()
+    task_server.cancel()
+    loop.close()
+    return
+
+
+def start_modbus():
+    asyncio.run(modbus_helper)
 
 
 if __name__ == '__main__':
     modbus_data_queue = Queue()
 
-    modbus_thread = threading.Thread(target=modbus_helper)
+    modbus_thread = threading.Thread(target=start_modbus)
     modbus_thread.start()
 
     app.run(ssl_context=(cert, key), debug=False, port="5001")
+    exit_event.set()
     SQL.closeSession()
     modbus_thread.join()
 
