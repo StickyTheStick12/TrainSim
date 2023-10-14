@@ -41,6 +41,7 @@ app.secret_key = b'_5#y2L"F4Q8z\n\xec]/'
 login_manager = LoginManager()
 login_manager.init_app(app)
 
+mutex = threading.Lock()
 
 class Users(UserMixin):
     def __init__(self,username, password,is_active=True):
@@ -205,7 +206,7 @@ def trainoccupiestrack(trackStatusOne, trackStatusTwo, jsonData):
                 trackStatusTwo = 'Occupied'
                 jsonData['trackTwoStatus'] = trackStatusTwo
             elif (train['track'] == '1' and trackStatusOne == 'Occupied') or (
-                    train['track'] == '2' and trackStatustwo == 'Occupied'):
+                    train['track'] == '2' and trackStatusTwo == 'Occupied'):
                 if train['tracktoken'] == '0':
                     trainTimeObj += timedelta(minutes=5)
                     newtime = trainTimeObj.strftime("%H:%M")
@@ -301,6 +302,28 @@ async def send_data(context: ModbusServerContext) -> None:
     """Takes data from queue and sends to client"""
     loop = asyncio.get_event_loop()
 
+    jsonData = openJson("data.json")
+
+    current_time = datetime.now().strftime("%H:%M")
+    index_to_remove = bisect_right([d['time'] for d in jsonData['trains']], current_time)
+    jsonData['trains'] = jsonData['trains'][index_to_remove:]
+
+    writeToJson("data.json", jsonData)
+
+    # First send track status
+    data = ["T", 1, jsonData["trackOneStatus"]]
+    modbus_data_queue.put(data)
+    data = ["T", 2, jsonData["trackTwoStatus"]]
+    modbus_data_queue.put(data)
+
+    idx = 0
+
+    # send train data
+    for item in jsonData['trains']:
+        data = ["A"] + [idx] + [value for key, value in item.items() if key != 'tracktoken']
+        idx += 1
+        modbus_data_queue.put(data)
+
     while True:
         # Run blocking call in executor so the server can respond to the client requests
         data = await loop.run_in_executor(None, modbus_data_queue.get)
@@ -356,50 +379,14 @@ async def send_data(context: ModbusServerContext) -> None:
 
 def modbus_helper() -> None:
     """Helps start modbus from a new thread"""
-
-    # 1. We acquire a mutex for the json file.
-    # 2. We copy all the data to the queue
-    # 3. we start the server and wait for the client to connect
-    # 4. We start writing data and starting the timer for 10 seconds
-    # 5. if the client hasn't read data in 10 seconds close connection, clear queue, acquire mutex, fill queue
-    # and restart server
-
-    # 1. We start the server
-
-
-    # 1. We start the server as before. We won't write anything to the client until it has connected. The flask
-    # will still work and put data in the queue but the server wont close.
-    # 2.
-
     loop = asyncio.new_event_loop()
     context = setup_server()
-
-    jsonData = openJson("data.json")
-
-    current_time = datetime.now().strftime("%H:%M")
-    index_to_remove = bisect_right([d['time'] for d in jsonData['trains']], current_time)
-    jsonData['trains'] = jsonData['trains'][index_to_remove:]
-
-    writeToJson("data.json", jsonData)
-
-    # First send track status
-    data = ["T", 1, jsonData["trackOneStatus"]]
-    modbus_data_queue.put(data)
-    data = ["T", 2, jsonData["trackTwoStatus"]]
-    modbus_data_queue.put(data)
-
-    idx = 0
-
-    # send train data
-    for item in jsonData['trains']:
-        data = ["A"] + [idx] + [value for key, value in item.items() if key != 'tracktoken']
-        idx += 1
-        modbus_data_queue.put(data)
 
     loop.create_task(send_data(context))
     loop.run_until_complete(modbus_server_thread(context))
 
     _logger.warning("Exiting modbus thread")
+    return
 
 
 if __name__ == '__main__':
