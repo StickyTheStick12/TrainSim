@@ -22,13 +22,9 @@ from pymodbus.device import ModbusDeviceIdentification
 from pymodbus.transaction import ModbusTlsFramer
 from pymodbus.server import StartAsyncTlsServer
 
-# when inserting a new train and the track becomes occupied it dont sends to gui
-# server doesn't close if the client hasn't read.
-# create a way to close the server
-
 logging.basicConfig()
 _logger = logging.getLogger(__file__)
-_logger.setLevel("DEBUG")
+_logger.setLevel("WARNING")
 
 # Modbus variables
 datastore_size = 41  # cant be bigger than 125
@@ -38,7 +34,7 @@ cert = "/home/vboxuser/tls/cert.pem"
 key = "/home/vboxuser/tls/key.pem"
 
 app = Flask(__name__)
-app.logger.setLevel("WARNING")
+app.logger.setLevel(logging.ERROR)
 
 ##Sessions för login
 app.secret_key = b'_5#y2L"F4Q8z\n\xec]/'
@@ -344,7 +340,6 @@ async def send_data(context: ModbusServerContext) -> None:
         while context[slave_id].getValues(func_code, datastore_size - 2, 1) == [0]:
             _logger.info("Waiting for client to connect; sleeping 2 second")
             await asyncio.sleep(2)  # give the server control so it can answer the client
-            _logger.debug("Client has connected")
 
         restart = False
 
