@@ -409,10 +409,16 @@ async def modbus_helper() -> None:
     task_server = loop.create_task(modbus_server_thread(context))
 
     while not exit_event.is_set():
-        await asyncio.sleep(5):
+        await asyncio.sleep(5)
 
     task_send_data.cancel()
     task_server.cancel()
+
+    try:
+        await asyncio.gather(task_send_data, task_server)  # Wait for tasks to complete/cancel
+    except asyncio.CancelledError:
+        pass  # Ignore CancelledError if tasks were canceled
+
     loop.close()
     return
 
