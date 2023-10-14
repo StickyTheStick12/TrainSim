@@ -77,13 +77,12 @@ def loginPage(invalid=False):
         user_credentials = {'username': request.form["username"], 'password': request.form["pwd"]}
         user = Users(user_credentials['username'],user_credentials['password'])
 
-        if user.username == authenticate[0]:
+        if user.username == authenticate[0] and user.password == authenticate[1]:
             login_user(user)
             return redirect(url_for('plcPage'))
         else:
             invalid=True
             return render_template("login.html",invalid=invalid)
-
 
     return render_template("login.html",invalid=invalid)
 
@@ -184,7 +183,8 @@ def writeToJson(jsonFile,dataJson):
 
 
 def trainoccupiestrack(trackStatusOne, trackStatusTwo, jsonData):
-    # sets all train tokens to 0 then gives train tokens to the next train thats arriving at the station or the train at the station so it doesnt update its own time
+    # sets all train tokens to 0 then gives train tokens to the next train thats arriving at the station or the train
+    # at the station so it doesnt update its own time
     timeFormat = "%H:%M"
     now = datetime.now()
     curTime = now.strftime(timeFormat)
@@ -241,6 +241,12 @@ def insert_timetable(train_list: list, new_element: dict) -> (list, int):
     # find the last position with time less than the current time
     current_time = datetime.now().strftime("%H:%M")
     index_to_remove = bisect_right([d['time'] for d in train_list], current_time)
+
+    # send message to gui to remove the entries
+    for i in range(1, index_to_remove+1):
+        data = ["R"] + [i]
+        modbus_data_queue.put(data)
+
     temp = train_list[index_to_remove:]
 
     # find the first position with time greater than or equal to the new time
@@ -318,7 +324,7 @@ async def send_data(context: ModbusServerContext) -> None:
             data = [len(tData)] + [data[1]] + [ord(char) for char in tData]
         else:
             # a register is 2 bytes, if we have a number greater than 2 bytes we have to use more than one register
-            _logger.critical("Maximum allowed trains are 65535")
+            _logger.error("Maximum allowed trains are 65535")
             return
 
         _logger.debug(f"converted data: {data}")
@@ -329,13 +335,13 @@ async def send_data(context: ModbusServerContext) -> None:
                 _logger.critical("Client hasn't emptied datastore in 10 seconds; connection may be lost")
                 return
             client_check += 1
-            _logger.debug("Waiting for client to copy datastore; sleeping 2 second")
+            _logger.info("Waiting for client to copy datastore; sleeping 2 second")
             await asyncio.sleep(2)  # give the server control so it can answer the client
 
         _logger.debug("Client has read data from datastore, writing new data")
         context[slave_id].setValues(func_code, address, data)
 
-        _logger.debug("Resetting flag")
+        _logger.info("Resetting flag")
         context[slave_id].setValues(func_code, datastore_size - 2, [0])
 
         # for value in data:
@@ -350,6 +356,21 @@ async def send_data(context: ModbusServerContext) -> None:
 
 def modbus_helper() -> None:
     """Helps start modbus from a new thread"""
+
+    # 1. We acquire a mutex for the json file.
+    # 2. We copy all the data to the queue
+    # 3. we start the server and wait for the client to connect
+    # 4. We start writing data and starting the timer for 10 seconds
+    # 5. if the client hasn't read data in 10 seconds close connection, clear queue, acquire mutex, fill queue
+    # and restart server
+
+    # 1. We start the server
+
+
+    # 1. We start the server as before. We won't write anything to the client until it has connected. The flask
+    # will still work and put data in the queue but the server wont close.
+    # 2.
+
     loop = asyncio.new_event_loop()
     context = setup_server()
 
@@ -378,7 +399,7 @@ def modbus_helper() -> None:
     loop.create_task(send_data(context))
     loop.run_until_complete(modbus_server_thread(context))
 
-    _logger.info("Exiting modbus thread")
+    _logger.warning("Exiting modbus thread")
 
 
 if __name__ == '__main__':
