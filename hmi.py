@@ -402,25 +402,23 @@ def modbus_helper() -> None:
     loop = asyncio.new_event_loop()
     context = setup_server()
 
-    loop.create_task(send_data(context))
-    loop.run_until_complete(modbus_server_thread(context))
+    task = loop.create_task(send_data(context))
 
-    _logger.warning("Exiting modbus thread")
-    return
+    try:
+        loop.run_until_complete(modbus_server_thread(context))
+    except KeyboardInterrupt:
+        task.cancel()
+        _logger.warning("Exiting modbus thread")
+        return
 
 
 if __name__ == '__main__':
     modbus_data_queue = Queue()
 
-    try:
-        modbus_thread = threading.Thread(target=modbus_helper)
-        modbus_thread.start()
+    modbus_thread = threading.Thread(target=modbus_helper)
+    modbus_thread.start()
 
-        app.run(ssl_context=(cert, key), debug=False, port="5001")
-    except KeyboardInterrupt:
-        _logger.warning("Closing sql")
-        SQL.closeSession()
-        _logger.warning("Joining modbus thread")
-        modbus_thread.join()
-        _logger.warning("Exiting")
+    app.run(ssl_context=(cert, key), debug=False, port="5001")
+    SQL.closeSession()
+    modbus_thread.join()
 
