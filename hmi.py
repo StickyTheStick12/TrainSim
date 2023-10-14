@@ -401,7 +401,8 @@ async def send_data(context: ModbusServerContext) -> None:
 
 async def modbus_helper() -> None:
     """Sets up server and send data task"""
-    loop = asyncio.get_event_loop()    context = setup_server()
+    loop = asyncio.get_event_loop()
+    context = setup_server()
 
     task_send_data = loop.create_task(send_data(context))
     task_server = loop.create_task(modbus_server_thread(context))
