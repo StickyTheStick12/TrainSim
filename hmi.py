@@ -172,14 +172,14 @@ def logOutUser():
 
 
 def openJson(jsonFile):
-    with open(jsonFile, 'r') as dataFile:
+    with mutex, open(jsonFile, 'r') as dataFile:
         jsonData = json.load(dataFile)
     return jsonData
 
 
 def writeToJson(jsonFile,dataJson):
     dataJson = json.dumps(dataJson,indent=3)
-    with open(jsonFile, 'w') as dataFile:
+    with mutex, open(jsonFile, 'w') as dataFile:
         dataFile.write(dataJson)
 
 
