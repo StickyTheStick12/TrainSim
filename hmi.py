@@ -345,8 +345,11 @@ async def send_data(context: ModbusServerContext) -> None:
             _logger.info("Waiting for client to connect; sleeping 2 second")
             await asyncio.sleep(2)  # give the server control so it can answer the client
 
+        restart = False
+
         # now start sending data
-        while True:
+        while not restart:
+            restart = False
             # Run blocking call in executor so the server can respond to the client requests
             data = await loop.run_in_executor(None, modbus_data_queue.get)
 
@@ -359,7 +362,7 @@ async def send_data(context: ModbusServerContext) -> None:
                 # check that we don't write too much data
                 if len(tData) > datastore_size - 5:
                     _logger.error("data is too long to send over modbus")
-                    return
+                    break
 
                 # add the length of the data to the package. We save space if we don't convert it to ascii.
                 data = [len(tData)] + [data[1]] + [ord(char) for char in tData]
@@ -374,16 +377,18 @@ async def send_data(context: ModbusServerContext) -> None:
             while context[slave_id].getValues(func_code, datastore_size-2, 1) == [0]:
                 if client_check == 5:
                     _logger.critical("Client hasn't emptied datastore in 10 seconds; connection may be lost")
+                    restart = True
                     break
                 client_check += 1
                 _logger.info("Waiting for client to copy datastore; sleeping 2 second")
                 await asyncio.sleep(2)  # give the server control so it can answer the client
 
-            _logger.debug("Client has read data from datastore, writing new data")
-            context[slave_id].setValues(func_code, address, data)
+            if not restart:
+                _logger.debug("Client has read data from datastore, writing new data")
+                context[slave_id].setValues(func_code, address, data)
 
-            _logger.info("Resetting flag")
-            context[slave_id].setValues(func_code, datastore_size - 2, [0])
+                _logger.info("Resetting flag")
+                context[slave_id].setValues(func_code, datastore_size - 2, [0])
 
             # for value in data:
             #    context[slave_id].setValues(func_code, address, value)
