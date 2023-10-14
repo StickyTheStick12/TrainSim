@@ -22,6 +22,10 @@ from pymodbus.device import ModbusDeviceIdentification
 from pymodbus.transaction import ModbusTlsFramer
 from pymodbus.server import StartAsyncTlsServer
 
+# when inserting a new train and the track becomes occupied it dont sends to gui
+# server doesn't close if the client hasn't read.
+# create a way to close the server
+
 logging.basicConfig()
 _logger = logging.getLogger(__file__)
 _logger.setLevel("WARNING")
@@ -34,6 +38,7 @@ cert = "/home/vboxuser/tls/cert.pem"
 key = "/home/vboxuser/tls/key.pem"
 
 app = Flask(__name__)
+app.logger.setLevel("WARNING")
 
 ##Sessions för login
 app.secret_key = b'_5#y2L"F4Q8z\n\xec]/'
@@ -302,79 +307,92 @@ async def send_data(context: ModbusServerContext) -> None:
     """Takes data from queue and sends to client"""
     loop = asyncio.get_event_loop()
 
-    jsonData = openJson("data.json")
+    func_code = 3  # function code for modbus that we want to read and write data from holding register
+    slave_id = 0x00  # we broadcast the data to all the connected slaves
+    address = 0x00  # the address to where to holding register are, i.e the start address in our case but we can write in the middle too
 
-    current_time = datetime.now().strftime("%H:%M")
-    index_to_remove = bisect_right([d['time'] for d in jsonData['trains']], current_time)
-    jsonData['trains'] = jsonData['trains'][index_to_remove:]
+    while(True):
+        # empty any data that is left in the queue and don't let the flask server write more data to the queue
+        # we also won't let the flask server to change the json file now because we want to copy the current values
 
-    writeToJson("data.json", jsonData)
+        with modbus_data_queue.mutex:
+            # empty queue if there is any data in it
+            modbus_data_queue.queue.clear()
+            jsonData = openJson("data.json")
 
-    # First send track status
-    data = ["T", 1, jsonData["trackOneStatus"]]
-    modbus_data_queue.put(data)
-    data = ["T", 2, jsonData["trackTwoStatus"]]
-    modbus_data_queue.put(data)
+        current_time = datetime.now().strftime("%H:%M")
+        index_to_remove = bisect_right([d['time'] for d in jsonData['trains']], current_time)
+        jsonData['trains'] = jsonData['trains'][index_to_remove:]
 
-    idx = 0
+        writeToJson("data.json", jsonData)
 
-    # send train data
-    for item in jsonData['trains']:
-        data = ["A"] + [idx] + [value for key, value in item.items() if key != 'tracktoken']
-        idx += 1
+        # First send track status
+        data = ["T", 1, jsonData["trackOneStatus"]]
+        modbus_data_queue.put(data)
+        data = ["T", 2, jsonData["trackTwoStatus"]]
         modbus_data_queue.put(data)
 
-    while True:
-        # Run blocking call in executor so the server can respond to the client requests
-        data = await loop.run_in_executor(None, modbus_data_queue.get)
+        idx = 0
 
-        func_code = 3  # function code for modbus that we want to read and write data from holding register
-        slave_id = 0x00  # we broadcast the data to all the connected slaves
-        address = 0x00  # the address to where to holding register are, i.e the start address in our case but we can write in the middle too
+        # send train data
+        for item in jsonData['trains']:
+            data = ["A"] + [idx] + [value for key, value in item.items() if key != 'tracktoken']
+            idx += 1
+            modbus_data_queue.put(data)
 
-        # check that index isn't bigger than what can be placed inside a single modbus register
-        if data[1] < 65535:
-            # convert our list to a string seperated by space "ghjfjfjf 15:14 1"
-            tData = data[0] + " " + " ".join(str(value) for value in data[2:])
-            _logger.debug(f"Sending {tData}")
-
-            # check that we don't write too much data
-            if len(tData) > datastore_size - 5:
-                _logger.error("data is too long to send over modbus")
-                return
-
-            # add the length of the data to the package. We save space if we don't convert it to ascii.
-            data = [len(tData)] + [data[1]] + [ord(char) for char in tData]
-        else:
-            # a register is 2 bytes, if we have a number greater than 2 bytes we have to use more than one register
-            _logger.error("Maximum allowed trains are 65535")
-            return
-
-        _logger.debug(f"converted data: {data}")
-
-        client_check = 0
-        while context[slave_id].getValues(func_code, datastore_size-2, 1) == [0]:
-            if client_check == 5:
-                _logger.critical("Client hasn't emptied datastore in 10 seconds; connection may be lost")
-                return
-            client_check += 1
-            _logger.info("Waiting for client to copy datastore; sleeping 2 second")
+        # wait until client has connected then go in to the other while loop
+        while context[slave_id].getValues(func_code, datastore_size - 2, 1) == [0]:
+            _logger.info("Waiting for client to connect; sleeping 2 second")
             await asyncio.sleep(2)  # give the server control so it can answer the client
 
-        _logger.debug("Client has read data from datastore, writing new data")
-        context[slave_id].setValues(func_code, address, data)
+        # now start sending data
+        while True:
+            # Run blocking call in executor so the server can respond to the client requests
+            data = await loop.run_in_executor(None, modbus_data_queue.get)
 
-        _logger.info("Resetting flag")
-        context[slave_id].setValues(func_code, datastore_size - 2, [0])
+            # check that index isn't bigger than what can be placed inside a single modbus register
+            if data[1] < 65535:
+                # convert our list to a string seperated by space "ghjfjfjf 15:14 1"
+                tData = data[0] + " " + " ".join(str(value) for value in data[2:])
+                _logger.debug(f"Sending {tData}")
 
-        # for value in data:
-        #    context[slave_id].setValues(func_code, address, value)
-        #    address += 1
+                # check that we don't write too much data
+                if len(tData) > datastore_size - 5:
+                    _logger.error("data is too long to send over modbus")
+                    return
 
-        # server starting with flag 0
-        # client connects and changes it to a 1
-        # server writes a 0 to the flag when it writes a new value
-        # client polls the flag for a 0 and when it finds that it will read the holding register and change it to a 1
+                # add the length of the data to the package. We save space if we don't convert it to ascii.
+                data = [len(tData)] + [data[1]] + [ord(char) for char in tData]
+            else:
+                # a register is 2 bytes, if we have a number greater than 2 bytes we have to use more than one register
+                _logger.error("Maximum allowed trains are 65535")
+                return
+
+            _logger.debug(f"converted data: {data}")
+
+            client_check = 0
+            while context[slave_id].getValues(func_code, datastore_size-2, 1) == [0]:
+                if client_check == 5:
+                    _logger.critical("Client hasn't emptied datastore in 10 seconds; connection may be lost")
+                    break
+                client_check += 1
+                _logger.info("Waiting for client to copy datastore; sleeping 2 second")
+                await asyncio.sleep(2)  # give the server control so it can answer the client
+
+            _logger.debug("Client has read data from datastore, writing new data")
+            context[slave_id].setValues(func_code, address, data)
+
+            _logger.info("Resetting flag")
+            context[slave_id].setValues(func_code, datastore_size - 2, [0])
+
+            # for value in data:
+            #    context[slave_id].setValues(func_code, address, value)
+            #    address += 1
+
+            # server starting with flag 0
+            # client connects and changes it to a 1
+            # server writes a 0 to the flag when it writes a new value
+            # client polls the flag for a 0 and when it finds that it will read the holding register and change it to a 1
 
 
 def modbus_helper() -> None:
