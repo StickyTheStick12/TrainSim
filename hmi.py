@@ -401,9 +401,7 @@ async def send_data(context: ModbusServerContext) -> None:
 
 async def modbus_helper() -> None:
     """Sets up server and send data task"""
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    context = setup_server()
+    loop = asyncio.get_event_loop()    context = setup_server()
 
     task_send_data = loop.create_task(send_data(context))
     task_server = loop.create_task(modbus_server_thread(context))
@@ -419,7 +417,6 @@ async def modbus_helper() -> None:
     except asyncio.CancelledError:
         pass  # Ignore CancelledError if tasks were canceled
 
-    loop.close()
     return
 
 
@@ -427,7 +424,7 @@ def start_modbus():
     """Helps to start modbus_helper so it runs async"""
     loop = asyncio.new_event_loop()
     loop.run_until_complete(modbus_helper())
-
+    loop.close()
 
 if __name__ == '__main__':
     modbus_data_queue = Queue()
