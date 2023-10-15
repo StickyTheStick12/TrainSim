@@ -42,7 +42,6 @@ login_manager = LoginManager()
 login_manager.init_app(app)
 
 mutex = multiprocessing.Lock()
-exit_event = multiprocessing.Event()
 
 
 class Users(UserMixin):
@@ -406,25 +405,20 @@ async def modbus_helper() -> None:
     task_send_data = loop.create_task(send_data(context))
     task_server = loop.create_task(modbus_server_thread(context))
 
-    while not exit_event.is_set():
-        await asyncio.sleep(5)
-
-    task_send_data.cancel()
-    task_server.cancel()
-
-    try:
-        await asyncio.gather(task_send_data, task_server)  # Wait for tasks to complete/cancel
-    except asyncio.CancelledError:
-        pass  # Ignore CancelledError if tasks were canceled
-
     return
 
 
-def start_modbus():
+def start_modbus() -> None:
     """Helps to start modbus_helper so it runs async"""
     loop = asyncio.new_event_loop()
-    loop.run_until_complete(modbus_helper())
-    loop.close()
+
+    try:
+        loop.run_until_complete(modbus_helper())
+    except KeyboardInterrupt:
+        loop.close()
+
+    return
+
 
 
 if __name__ == '__main__':
@@ -435,6 +429,5 @@ if __name__ == '__main__':
     modbus_process.start()
 
     app.run(ssl_context=(cert, key), debug=False, port="5001")
-    exit_event.set()
     SQL.closeSession()
     modbus_process.join()
