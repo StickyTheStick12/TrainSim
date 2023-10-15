@@ -7,10 +7,11 @@ mysql
 pymodbus                                          
 customtkinter                                          
 
-To run the simulation you have to run GUI.py before HMI.py. The GUI.py will log an warning every second until the HMI comes online but isn't anything to worry about. Don't forget to change to correct tls path in the GUI and HMI files.
+**How to run**
+It doesn't matter if you start hmi.py or gui.py first. GUI.py will log an error every second until the HMI.py starts but the error can be neglected. 
 
 **Good to know:**
 * The modbus server only supports 65535 trains simultaneously. 
 * A ' '. space, inside of the name isn't allowed
-* The modbus that runs with the HMI will shutdown after 10 seconds if the client doesn't read any data.
+* The modbus server, the hmi, will restart after 10 seconds if the server doesn't read data that is sent. It will then send all the data again. 
 * You can increase the available length of the train name in the modbus_data_size, max 125 which results in a name that is a little over 100 characters. Both the HMI and GUI needs to have the same length.  
