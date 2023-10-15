@@ -311,7 +311,7 @@ async def send_data(context: ModbusServerContext) -> None:
         # empty any data that is left in the queue and don't let the flask server write more data to the queue
         # we also won't let the flask server to change the json file now because we want to copy the current values
 
-        with modbus_data_queue.mutex:
+        with mutex:
             # empty queue if there is any data in it
             while not modbus_data_queue.empty():
                 modbus_data_queue.get_nowait()
@@ -424,7 +424,6 @@ def start_modbus() -> None:
 
 
 if __name__ == '__main__':
-    multiprocessing.set_start_method("fork")
     modbus_data_queue = multiprocessing.Queue()
 
     modbus_process = multiprocessing.Process(target=start_modbus)
