@@ -42,7 +42,6 @@ login_manager = LoginManager()
 login_manager.init_app(app)
 
 mutex = multiprocessing.Lock()
-exit_event = multiprocessing.Event()
 
 class Users(UserMixin):
     def __init__(self,username, password,is_active=True):
@@ -401,38 +400,21 @@ async def send_data(context: ModbusServerContext) -> None:
 
 async def modbus_helper() -> None:
     """Sets up server and send data task"""
-    loop = asyncio.get_event_loop()
+    loop = asyncio.new_event_loop()
     context = setup_server()
 
     loop.create_task(send_data(context))
-    loop.create_task(modbus_server_thread(context))
-
-    while not exit_event.is_set():
-        await asyncio.sleep(5)
+    loop.run_until_complete(modbus_server_thread(context))
 
     return
-
-
-def start_modbus() -> None:
-    """Helps to start modbus_helper so it runs async"""
-    loop = asyncio.new_event_loop()
-
-    try:
-        loop.run_until_complete(modbus_helper())
-    except KeyboardInterrupt:
-        loop.close()
-
-    return
-
 
 
 if __name__ == '__main__':
     modbus_data_queue = multiprocessing.Queue()
 
-    modbus_process = multiprocessing.Process(target=start_modbus)
+    modbus_process = multiprocessing.Process(target=modbus_helper)
     modbus_process.start()
 
     app.run(ssl_context=(cert, key), debug=False, port="5001")
     SQL.closeSession()
-    exit_event.set()
     modbus_process.join()
