@@ -7,10 +7,9 @@ import modules as SQL
 import json
 from datetime import datetime, timedelta
 import asyncio
-import threading
+import multiprocessing
 import logging
 from bisect import bisect_right, bisect_left
-from queue import Queue
 
 from pymodbus import __version__ as pymodbus_version
 from pymodbus.datastore import (
@@ -42,8 +41,8 @@ app.secret_key = b'_5#y2L"F4Q8z\n\xec]/'
 login_manager = LoginManager()
 login_manager.init_app(app)
 
-mutex = threading.Lock()
-exit_event = threading.Event()
+mutex = multiprocessing.Lock()
+exit_event = multiprocessing.Event()
 
 
 class Users(UserMixin):
@@ -427,13 +426,15 @@ def start_modbus():
     loop.run_until_complete(modbus_helper())
     loop.close()
 
-if __name__ == '__main__':
-    modbus_data_queue = Queue()
 
-    modbus_thread = threading.Thread(target=start_modbus)
-    modbus_thread.start()
+if __name__ == '__main__':
+    multiprocessing.set_start_method("fork")
+    modbus_data_queue = multiprocessing.Queue()
+
+    modbus_process = multiprocessing.Process(target=start_modbus)
+    modbus_process.start()
 
     app.run(ssl_context=(cert, key), debug=False, port="5001")
     exit_event.set()
     SQL.closeSession()
-    modbus_thread.join()
+    modbus_process.join()
