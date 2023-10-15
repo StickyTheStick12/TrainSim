@@ -72,7 +72,6 @@ def loader_user(user_id):
 @app.route('/', methods=["POST","GET"])
 def loginPage(invalid=False):
     if request.method == "POST":
-
         authenticate = SQL.checkAuthentication()
 
         ## Här får vi data från loginet. Gör backend saker som kontroller etc
@@ -110,25 +109,23 @@ def plcPage(change=None):
             match buttonClicked:
                 case "track1":
                     if trackStatusOne == trackStatus[0]:
-                        trackStatusOne = trackStatus[1]
                         jsonData['trackOneStatus'] = trackStatus[1]
                     else:
-                        trackStatusOne = trackStatus[0]
                         jsonData['trackOneStatus'] = trackStatus[0]
 
                     data = ["T", 1, jsonData["trackOneStatus"]]
-                    modbus_data_queue.put(data)
+                    with mutex:
+                        modbus_data_queue.put(data)
 
                 case "track2":
                     if trackStatusTwo == trackStatus[0]:
-                        trackStatusTwo = trackStatus[1]
                         jsonData['trackTwoStatus'] = trackStatus[1]
                     else:
-                        trackStatusTwo = trackStatus[0]
                         jsonData['trackTwoStatus'] = trackStatus[0]
 
                     data = ["T", 2, jsonData["trackTwoStatus"]]
-                    modbus_data_queue.put(data)
+                    with mutex:
+                        modbus_data_queue.put(data)
 
                 case "addTimeForm":
                     change = "addTimeForm"
@@ -150,14 +147,16 @@ def plcPage(change=None):
                     jsonData = trainoccupiestrack(trackStatusOne, trackStatusTwo, jsonData)
                     data = ["A"] + [temp[1]] + list(data.values())
 
-                    modbus_data_queue.put(data)
+                    with mutex:
+                        modbus_data_queue.put(data)
 
                 case "deleteTime":
                     id = int(request.form.get('id', False))
                     if id <= len(jsonData['trains']):
                         jsonData['trains'].pop(id - 1)
                         data = ["R"] + [id - 1]
-                        modbus_data_queue.put(data)
+                        with mutex:
+                            modbus_data_queue.put(data)
 
         writeToJson('data.json', jsonData)
 
@@ -173,7 +172,7 @@ def logOutUser():
 
 
 def openJson(jsonFile):
-    with mutex, open(jsonFile, 'r') as dataFile:
+    with open(jsonFile, 'r') as dataFile:
         jsonData = json.load(dataFile)
     return jsonData
 
@@ -247,7 +246,8 @@ def insert_timetable(train_list: list, new_element: dict) -> (list, int):
     # send message to gui to remove the entries
     for i in range(1, index_to_remove+1):
         data = ["R"] + [i]
-        modbus_data_queue.put(data)
+        with mutex:
+            modbus_data_queue.put(data)
 
     temp = train_list[index_to_remove:]
 
@@ -313,7 +313,9 @@ async def send_data(context: ModbusServerContext) -> None:
 
         with modbus_data_queue.mutex:
             # empty queue if there is any data in it
-            modbus_data_queue.queue.clear()
+            while not modbus_data_queue.empty():
+                modbus_data_queue.get_nowait()
+
             jsonData = openJson("data.json")
 
         current_time = datetime.now().strftime("%H:%M")
