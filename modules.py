@@ -1,12 +1,13 @@
 import mysqlx
 from mysqlx.errors import DatabaseError
+
 # Connect to server on localhost, close session also defined here
 session = mysqlx.get_session({
-    'host': 'localhost',
-    'port': 33060,
-    'user': 'debian-sys-maint',
-    'password': 'RocmET1Ek1eikelK',
-    'schema': 'tssc'
+	'host': 'localhost',
+	'port': 33060,
+	'user': 'debian-sys-maint',
+	'password': 'RocmET1Ek1eikelK',
+	'schema': 'tssc'
 })
 
 
@@ -21,6 +22,7 @@ def checkAuthentication():
 		result = session.sql(query).execute()
 		data = result.fetch_all()[0]
 	except DatabaseError as error:
-		print("ERROR : Database error noticed: ",error)
+		print("ERROR : Database error noticed: ", error)
+		data = None
 
 	return data
