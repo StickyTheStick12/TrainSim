@@ -5,8 +5,7 @@ from pymodbus.exceptions import ModbusException
 
 import asyncio
 import logging
-import threading
-from queue import Queue
+import multiprocessing
 
 logging.basicConfig()
 _logger = logging.getLogger(__file__)
@@ -216,17 +215,10 @@ def modbus_client_thread(modbus_data_queue) -> None:
 
 
 if __name__ == "__main__":
-    modbus_data_queue = Queue()
+    modbus_data_queue = multiprocessing.Queue()
 
-    modbus_thread = threading.Thread(target=modbus_client_thread, args=(modbus_data_queue,))
-    modbus_thread.start()
+    modbus_process = multiprocessing.Process(target=modbus_client_thread, args=(modbus_data_queue,))
+    modbus_process.start()
     # Initialize the Train Station HMI
     train_station_hmi = TrainStation()
     train_station_hmi.after(1000, train_station_hmi.process_modbus_data)
-
-    try:
-        train_station_hmi.mainloop()
-    except KeyboardInterrupt:
-        _logger.info("Program terminated by user")
-        modbus_thread.join()
-    modbus_thread.join()
