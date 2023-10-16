@@ -9,7 +9,7 @@ import multiprocessing
 
 logging.basicConfig()
 _logger = logging.getLogger(__file__)
-_logger.setLevel("WARNING")
+_logger.setLevel("DEBUG")
 
 # Modbus variables
 datastore_size = 41  # needs to be the same size as the server, max 125 though
@@ -187,11 +187,8 @@ def modbus_client_thread() -> None:
                         # 10 1 A gffff 15:15 1
                         amount_to_read = hold_register.registers[0]
                         idx = hold_register.registers[1]
-                        data = "".join([chr(char) for char in hold_register.registers[2:2 + amount_to_read]]).split(" ")
-                        func_code = data[1]
-                        temp_index = data.index(':')
-                        name = " ".join(data[1:temp_index-2])
-                        data = [idx] + [func_code] + [name] + data[temp_index-2:]
+                        data = [idx] + "".join(
+                            [chr(char) for char in hold_register.registers[2:2 + amount_to_read]]).split(" ")
                         _logger.debug(f"received {data}")
                         _logger.debug("Resetting flag")
                         await client.write_register(datastore_size - 2, 1, slave=1)
