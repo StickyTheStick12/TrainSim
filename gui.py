@@ -187,8 +187,11 @@ def modbus_client_thread() -> None:
                         # 10 1 A gffff 15:15 1
                         amount_to_read = hold_register.registers[0]
                         idx = hold_register.registers[1]
-                        data = [idx] + "".join(
-                            [chr(char) for char in hold_register.registers[2:2 + amount_to_read]]).split(" ")
+                        data = "".join([chr(char) for char in hold_register.registers[2:2 + amount_to_read]]).split(" ")
+                        func_code = data[1]
+                        temp_index = data.index(':')
+                        name = " ".join(data[1:temp_index-2])
+                        data = [idx] + [func_code] + [name] + data[temp_index-2:]
                         _logger.debug(f"received {data}")
                         _logger.debug("Resetting flag")
                         await client.write_register(datastore_size - 2, 1, slave=1)
