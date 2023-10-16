@@ -137,7 +137,7 @@ class TrainStation(ctk.CTk):
         self.after(1000, self.process_modbus_data)
 
 
-def modbus_client_thread(modbus_data_queue) -> None:
+def modbus_client_thread() -> None:
     """This thread will start the modbus client and connect to the server"""
     client = None
 
@@ -216,7 +216,7 @@ def modbus_client_thread(modbus_data_queue) -> None:
 if __name__ == "__main__":
     modbus_data_queue = multiprocessing.Queue()
 
-    modbus_process = multiprocessing.Process(target=modbus_client_thread, args=(modbus_data_queue,))
+    modbus_process = multiprocessing.Process(target=modbus_client_thread)
     modbus_process.start()
     # Initialize the Train Station HMI
     train_station_hmi = TrainStation()
