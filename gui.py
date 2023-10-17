@@ -134,7 +134,7 @@ class TrainStation(ctk.CTk):
                 case "T":
                     self.update_data_tracks(int(data[0]), data[2])  # (track) 1, (status) "occupied"
 
-        self.after(1000, self.process_modbus_data)
+        self.after(500, self.process_modbus_data)
 
 
 def modbus_client_thread() -> None:
@@ -198,8 +198,8 @@ def modbus_client_thread() -> None:
                     else:
                         _logger.error("Error reading holding register")
 
-                _logger.debug("sleeping for 1 second")
-                await asyncio.sleep(1)
+                _logger.debug("sleeping for 0.5 second")
+                await asyncio.sleep(0.5)
         except ModbusException as exc:
             _logger.error(f"Received ModbusException({exc}) from library")
             client.close()
