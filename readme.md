@@ -1,8 +1,8 @@
 **Dependencies:**                                          
-bcrypt 4.0.1,                                          
-flask 2.3.3,                             
+bcrypt                                          
+flask 2.3.3                            
 flask login 0.6.2                                          
-flask talisman 1.1.0                                          
+flask talisman                                          
 mysql                                          
 pymodbus                                          
 customtkinter                                          
