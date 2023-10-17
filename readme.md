@@ -2,7 +2,6 @@
 bcrypt                                          
 flask 2.3.3                            
 flask login 0.6.2                                          
-flask talisman                                          
 mysql                                          
 pymodbus                                          
 customtkinter                                          
