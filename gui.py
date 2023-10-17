@@ -9,7 +9,7 @@ import multiprocessing
 
 logging.basicConfig()
 _logger = logging.getLogger(__file__)
-_logger.setLevel("DEBUG")
+_logger.setLevel("WARNING")
 
 # Modbus variables
 datastore_size = 41  # needs to be the same size as the server, max 125 though
