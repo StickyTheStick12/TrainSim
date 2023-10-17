@@ -371,13 +371,13 @@ async def send_data(context: ModbusServerContext) -> None:
             client_check = 0
             while context[slave_id].getValues(func_code, datastore_size - 2, 1) == [0]:
                 if client_check == 5:
-                    _logger.critical("Client hasn't emptied datastore in 10 seconds; connection may be lost")
+                    _logger.critical("Client hasn't emptied datastore in 5 seconds; connection may be lost")
                     _logger.info("Restarting server")
                     restart = True
                     break
                 client_check += 1
-                _logger.debug("Waiting for client to copy datastore; sleeping 2 second")
-                await asyncio.sleep(2)  # give the server control so it can answer the client
+                _logger.debug("Waiting for client to copy datastore; sleeping 1 second")
+                await asyncio.sleep(1)  # give the server control so it can answer the client
 
             if not restart:
                 _logger.debug("Client has read data from datastore, writing new data")
