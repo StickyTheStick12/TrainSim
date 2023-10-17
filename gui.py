@@ -207,8 +207,6 @@ def modbus_client_thread() -> None:
             _logger.info("Keyboard interrupt received. Exiting.")
             client.close()
 
-    print(path_to_cert)
-
     loop.run_until_complete(run_client())
     loop.run_until_complete(read_holding_register())
 
