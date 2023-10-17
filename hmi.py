@@ -136,15 +136,15 @@ def plcPage(change=None):
                     train_data = {
                         'trainNumber': request.form.get('trainNumber', False),
                         'time': request.form.get('departure', False),
-                        'track': request.form.get('tracktype', False)}
-
-                    data = train_data.copy()
-                    train_data['tracktoken'] = '0'
+                        'track': request.form.get('tracktype', False),
+                        'tracktoken': '0'}
 
                     temp = insert_timetable(json_data['trains'], train_data)
                     json_data['trains'] = temp[0]
                     json_data = trainoccupiestrack(json_data)
-                    data = ["A"] + [temp[1]] + list(data.values())
+                    data = (["A"] + [temp[1]] + [json_data["trains"][temp[1]]["trainNumber"]] +
+                            [json_data["trains"][temp[1]]["time"]] +
+                            [json_data["trains"][temp[1]]["track"]])
 
                     with mutex:
                         modbus_data_queue.put(data)
@@ -396,7 +396,7 @@ async def send_data(context: ModbusServerContext) -> None:
         # client polls the flag for a 0 and when it finds that it will read the holding register and change it to a 1
 
 
-async def modbus_helper() -> None:
+def modbus_helper() -> None:
     """Sets up server and send data task"""
     loop = asyncio.new_event_loop()
     context = setup_server()
