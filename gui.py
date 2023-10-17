@@ -221,3 +221,4 @@ if __name__ == "__main__":
     # Initialize the Train Station HMI
     train_station_hmi = TrainStation()
     train_station_hmi.after(1000, train_station_hmi.process_modbus_data)
+    train_station_hmi.mainloop()
