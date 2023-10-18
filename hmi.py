@@ -200,10 +200,20 @@ def trainoccupiestrack(json_data):
                 train['tracktoken'] = '1'
                 track_status_one = 'Occupied'
                 json_data['trackOneStatus'] = track_status_one
+
+                data = ["T", 1, json_data["trackOneStatus"]]
+                with mutex:
+                    modbus_data_queue.put(data)
+
             elif train['track'] == '2' and track_status_two == 'Available':
                 train['tracktoken'] = '2'
                 track_status_two = 'Occupied'
                 json_data['trackTwoStatus'] = track_status_two
+
+                data = ["T", 2, json_data["trackTwoStatus"]]
+                with mutex:
+                    modbus_data_queue.put(data)
+
             elif (train['track'] == '1' and track_status_one == 'Occupied') or (
                     train['track'] == '2' and track_status_two == 'Occupied'):
                 if train['tracktoken'] == '0':
@@ -338,7 +348,7 @@ async def send_data(context: ModbusServerContext) -> None:
         # wait until client has connected then go in to the other while loop
         while context[slave_id].getValues(func_code, datastore_size - 2, 1) == [0]:
             _logger.info("Waiting for client to connect; sleeping 2 second")
-            await asyncio.sleep(2)  # give the server control so it can answer the client
+            await asyncio.sleep(1)  # give the server control so it can answer the client
 
         restart = False
 
@@ -371,12 +381,12 @@ async def send_data(context: ModbusServerContext) -> None:
             client_check = 0
             while context[slave_id].getValues(func_code, datastore_size - 2, 1) == [0]:
                 if client_check == 5:
-                    _logger.critical("Client hasn't emptied datastore in 5 seconds; connection may be lost")
+                    _logger.critical("Client hasn't emptied datastore in 10 seconds; connection may be lost")
                     _logger.info("Restarting server")
                     restart = True
                     break
                 client_check += 1
-                _logger.debug("Waiting for client to copy datastore; sleeping 1 second")
+                _logger.debug("Waiting for client to copy datastore; sleeping 2 second")
                 await asyncio.sleep(1)  # give the server control so it can answer the client
 
             if not restart:
