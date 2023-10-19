@@ -246,22 +246,10 @@ def insert_timetable(train_list: list, new_element: dict) -> (list, int):
     """Insert a new element into the json file and removes the entries whose times have passed."""
     time_to_insert = new_element['time']
 
-    # find the last position with time less than the current time
-    current_time = datetime.now().strftime("%H:%M")
-    index_to_remove = bisect_right([d['time'] for d in train_list], current_time)
-
-    # send message to gui to remove the entries
-    for i in range(1, index_to_remove + 1):
-        data = ["R"] + [i]
-        with mutex:
-            modbus_data_queue.put(data)
-
-    temp = train_list[index_to_remove:]
-
     # find the first position with time greater than or equal to the new time
-    index_to_insert = bisect_left([d['time'] for d in temp], time_to_insert)
-    temp.insert(index_to_insert, new_element)
-    return temp, index_to_insert
+    index_to_insert = bisect_left([d['time'] for d in train_list], time_to_insert)
+    train_list.insert(index_to_insert, new_element)
+    return train_list, index_to_insert
 
 
 async def modbus_server_thread(context: ModbusServerContext) -> None:
