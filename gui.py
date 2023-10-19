@@ -190,11 +190,9 @@ def modbus_client_thread() -> None:
                         data = "".join([chr(char) for char in hold_register.registers[2:2 + amount_to_read]]).split(" ")
                         func_code = data[1]
 
-                        try:
-                            temp_index = data[::-1].index(':')
-                            name = " ".join(data[1:temp_index-2])
-                            data = [idx] + [func_code] + [name] + data[temp_index-2:temp_index+3] + data[temp_index+3:]
-                        except ValueError:
+                        if len(data) > 3:
+                            data = [idx] + [func_code] + [data[2:-2]] + data[-2] + data[-1]
+                        else:
                             data = [idx] + "".join(
                                 [chr(char) for char in hold_register.registers[2:2 + amount_to_read]]).split(" ")
 
