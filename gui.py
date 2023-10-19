@@ -134,7 +134,7 @@ class TrainStation(ctk.CTk):
                 case "T":
                     self.update_data_tracks(int(data[0]), data[2])  # (track) 1, (status) "occupied"
 
-        self.after(1000, self.process_modbus_data)
+        self.after(500, self.process_modbus_data)
 
 
 def modbus_client_thread() -> None:
@@ -187,15 +187,8 @@ def modbus_client_thread() -> None:
                         # 10 1 A gffff 15:15 1
                         amount_to_read = hold_register.registers[0]
                         idx = hold_register.registers[1]
-                        data = "".join([chr(char) for char in hold_register.registers[2:2 + amount_to_read]]).split(" ")
-                        func_code = data[1]
-
-                        if len(data) > 3:
-                            data = [idx] + [func_code] + [data[2:-2]] + data[-2] + data[-1]
-                        else:
-                            data = [idx] + "".join(
-                                [chr(char) for char in hold_register.registers[2:2 + amount_to_read]]).split(" ")
-
+                        data = [idx] + "".join(
+                            [chr(char) for char in hold_register.registers[2:2 + amount_to_read]]).split(" ")
                         _logger.debug(f"received {data}")
                         _logger.debug("Resetting flag")
                         await client.write_register(datastore_size - 2, 1, slave=1)
@@ -205,16 +198,14 @@ def modbus_client_thread() -> None:
                     else:
                         _logger.error("Error reading holding register")
 
-                _logger.debug("sleeping for 1 second")
-                await asyncio.sleep(1)
+                _logger.debug("sleeping for 0.5 second")
+                await asyncio.sleep(0.5)
         except ModbusException as exc:
             _logger.error(f"Received ModbusException({exc}) from library")
             client.close()
         except KeyboardInterrupt:
             _logger.info("Keyboard interrupt received. Exiting.")
             client.close()
-
-    print(path_to_cert)
 
     loop.run_until_complete(run_client())
     loop.run_until_complete(read_holding_register())
@@ -228,3 +219,4 @@ if __name__ == "__main__":
     # Initialize the Train Station HMI
     train_station_hmi = TrainStation()
     train_station_hmi.after(1000, train_station_hmi.process_modbus_data)
+    train_station_hmi.mainloop()
