@@ -189,9 +189,15 @@ def modbus_client_thread() -> None:
                         idx = hold_register.registers[1]
                         data = "".join([chr(char) for char in hold_register.registers[2:2 + amount_to_read]]).split(" ")
                         func_code = data[1]
-                        temp_index = data[::-1].index(':')
-                        name = " ".join(data[1:temp_index-2])
-                        data = [idx] + [func_code] + [name] + data[temp_index-2:temp_index+3] + data[temp_index+3:]
+
+                        try:
+                            temp_index = data[::-1].index(':')
+                            name = " ".join(data[1:temp_index-2])
+                            data = [idx] + [func_code] + [name] + data[temp_index-2:temp_index+3] + data[temp_index+3:]
+                        except ValueError:
+                            data = [idx] + "".join(
+                                [chr(char) for char in hold_register.registers[2:2 + amount_to_read]]).split(" ")
+
                         _logger.debug(f"received {data}")
                         _logger.debug("Resetting flag")
                         await client.write_register(datastore_size - 2, 1, slave=1)
