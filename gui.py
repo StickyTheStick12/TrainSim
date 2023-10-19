@@ -185,10 +185,17 @@ def modbus_client_thread() -> None:
 
                     if not hold_register.isError():
                         # 10 1 A gffff 15:15 1
-                        amount_to_read = hold_register.registers[0]
+                          amount_to_read = hold_register.registers[0]
                         idx = hold_register.registers[1]
-                        data = [idx] + "".join(
-                            [chr(char) for char in hold_register.registers[2:2 + amount_to_read]]).split(" ")
+                        data = "".join([chr(char) for char in hold_register.registers[2:2 + amount_to_read]]).split(" ")
+
+                        if len(data) > 4:
+                            func_code = data[0]
+                            name = " ".join(data[1:-2])
+                            data = [idx] + [func_code] + [name]+ [data[-2]] + [data[-1]]
+                        else:
+                            data = [idx] + data
+                        
                         _logger.debug(f"received {data}")
                         _logger.debug("Resetting flag")
                         await client.write_register(datastore_size - 2, 1, slave=1)
