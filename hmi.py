@@ -1,8 +1,8 @@
 # TODO: Send departure data to the gui
 # TODO: changing departure time should update in the gui
 # TODO: data should be available in hmi
-# TODO: should be able to add a new train
 
+import bisect
 import json
 from datetime import datetime, timedelta
 import asyncio
@@ -54,8 +54,9 @@ track4 = asyncio.Event()
 track5 = asyncio.Event()
 track6 = asyncio.Event()
 
-track_status = [track1, track2, track3, track4, track5, track6]  # this is the track_status that the trains use when deciding on a track.
-real_track_status = ["A"]*6  # this is the actual representation if a track is available or not (attack control)
+track_status = [track1, track2, track3, track4, track5,
+                track6]  # this is the track_status that the trains use when deciding on a track.
+real_track_status = ["A"] * 6  # this is the actual representation if a track is available or not (attack control)
 
 switch_status = 1  # 0 - 6
 
@@ -132,7 +133,7 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
     loop.create_task(update_arrival())
 
     # wait so we have time to update the json files
-    await asyncio.sleep(10)
+    await asyncio.sleep(2)
 
     async with arrival_file_mutex:
         try:
@@ -212,10 +213,10 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
 
         # K: update the key for the gui
         # Packet ["K", b"key", b"encrypted new key"]
-        
+
         # TODO
         # h: inserts a new time in the json files
-        # Packet ["h", "AdvertisedTimeArrival", "AdvertisedTimeDeparture", "ToLocation", Track] 
+        # Packet ["h", "AdvertisedTimeArrival", "AdvertisedTimeDeparture", "ToLocation", Track]
 
         match data[0]:
             case "a":
@@ -251,11 +252,8 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                     _logger.info("Received switch update from simulation")
                     await switch_queue.put(data[1:])
 
-                    difference = (last_acquired_switch - datetime.now()).total_seconds()
+                    difference = max((last_acquired_switch - datetime.now()).total_seconds(), 0)
                     update_time = (5 * switch_queue.qsize() + difference) // 60  # Convert to minutes
-
-                    # Format update_time as hh:mm
-                    formatted_time = "{:02d}:{:02d}".format(int(update_time // 60), int(update_time % 60))
 
                     if data[1] == 0:
                         async with arrival_file_mutex:
@@ -265,13 +263,14 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                             except FileNotFoundError:
                                 _logger.error("Arrival.json not found")
 
-                        if formatted_time <= json_data[0]:
-                            formatted_time = json_data[0] + timedelta(minutes=5)
+                        json_data[0]["EstimatedTime"] = (
+                                datetime.strptime(json_data[0]["EstimatedTime"], "%Y-%m-%d %H:%M") + timedelta(
+                            minutes=update_time)).strftime("%Y-%m-%d %H:%M")
 
                         async with departure_file_mutex:
                             with open('departure.json', 'r+') as json_file:
                                 json_data = json.load(json_file)
-                                json_data[0]["EstimatedTime"] = formatted_time
+                                json_data[0]["EstimatedTime"] = formatted_time.strftime("%Y-%m-%d %H:%M")
                                 json.dump(json_data, json_file, indent=2)
                     else:
                         async with arrival_file_mutex:
@@ -310,21 +309,29 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                         for i in range(len(json_data)):
                             if json_data[i]["AdvertisedTime"] == data[1]:
                                 json_data[i]["TrackAtLocation"] = data[2]
-                                modbus_data_queue.put(["U", json_data[i]["AdvertisedTime"], json_data[i]["TrackAtLocation"]])
+                                modbus_data_queue.put(
+                                    ["U", json_data[i]["AdvertisedTime"], json_data[i]["TrackAtLocation"]])
 
                         json_file.seek(0)
                         json.dump(json_data, json_file, indent=2)
             case "h":
-                # logic here
-                #  Datan behöver vara i sorterad ordning så ifall du placerar den först i listan så kommer du behöva använda denna koden
-                
-                wake_arrival.set() # ifall du sätter den överst i arrival.json
-                wake_departure.set() # ifall du sätter den överst i departure.json
-                
-                
-        
-        
-        
+                train_data = {'AdvertisedTime': data[1], 'EstimatedTime': data[2], 'ToLocation': data[3]}
+                async with departure_file_mutex:
+                    with open('departure.json', 'r') as departures:
+                        departure_data = json.load(departures)
+                existing_times = [item['AdvertisedTime'] for item in departure_data]
+                insert_index = bisect.bisect_left(existing_times, train_data['AdvertisedTime'])
+
+                if insert_index == 0:
+                    wake_departure.set()
+
+                departure_data.insert(insert_index, train_data)
+                async with departure_file_mutex:
+                    with open('departure.json', 'w') as departures:
+                        json.dump(departure_data, departures, indent=2)
+
+                wake_arrival.set()  # ifall du sätter den överst i arrival.json
+
             case _:
                 data_sent += 1
 
@@ -345,27 +352,28 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                 signature = sha256.hexdigest()
                 nonce = [char for char in secrets.token_bytes(2) if char != 32]
 
-                data = [len(data)] + [ord(char) for char in data] + [32] + nonce + [32] + [char for char in signature]
-
+                data = [len(data)] + [ord(char) for char in data] + [32] + nonce + [32] + [ord(char) for char in signature]
+                _logger.info(f"Writing data: {data}")
                 sha256 = hashlib.sha256()
                 expected_signature = bytes(nonce) + secret_key
                 sha256.update(expected_signature)
                 expected_signature = sha256.hexdigest()
 
-                # continue sending old data until the client writes the correct signature
-                while True:
-                    # wait until the client has read the data
-                    while context[slave_id].getValues(func_code, datastore_size - 2, 1) == [0]:
-                        _logger.debug("Waiting for client to copy datastore; sleeping 2 second")
-                        await asyncio.sleep(2)  # give the server control so it can answer the client
+                if prior_data:
+                    # continue sending old data until the client writes the correct signature
+                    while True:
+                        # wait until the client has read the data
+                        while context[slave_id].getValues(func_code, datastore_size - 2, 1) == [0]:
+                            _logger.debug("Waiting for client to copy datastore; sleeping 2 second")
+                            await asyncio.sleep(2)  # give the server control so it can answer the client
 
-                    if context[slave_id].getValues(func_code, 0, 32) == [prior_signature]:
-                        break
+                        if context[slave_id].getValues(func_code, 0, 32) == [prior_signature]:
+                            break
 
-                    _logger.warning("Wrong signature tried to validate data in the holding register")
-                    context[slave_id].setValues(func_code, address, prior_data)
-                    _logger.info("Resetting flag")
-                    context[slave_id].setValues(func_code, datastore_size - 2, [0])
+                        _logger.warning("Wrong signature tried to validate data in the holding register")
+                        context[slave_id].setValues(func_code, address, prior_data)
+                        _logger.info("Resetting flag")
+                        context[slave_id].setValues(func_code, datastore_size - 2, [0])
 
                 _logger.debug("Client has read data from datastore, writing new data")
                 context[slave_id].setValues(func_code, address, data)
@@ -545,7 +553,7 @@ async def arrival() -> None:
                     if not track_status[i].is_set():
                         # If the alternate track is available, occupy it and update track status
                         _logger.info("Original track wasn't available, chose another track instead")
-                        track_number = i+1
+                        track_number = i + 1
                         json_data[0]['TrackAtLocation'] = str(track_number)
                         modbus_data_queue.put(["t", track_number, "O"])
                         modbus_data_queue.put(["s", 1, str(track_number), first_entry['AdvertisedTime']])
@@ -573,7 +581,7 @@ async def arrival() -> None:
                         if not track_status[i].is_set():
                             # If the alternate track is available, occupy it and update track status
                             _logger.info("Original track wasn't available, chose another track instead")
-                            track_number = i+1
+                            track_number = i + 1
                             json_data[0]['TrackAtLocation'] = str(track_number)
                             modbus_data_queue.put(["t", track_number, "O"])
                             modbus_data_queue.put(["s", 1, str(track_number), first_entry['AdvertisedTime']])
@@ -724,7 +732,7 @@ async def update_arrival() -> None:
     else:
         _logger.error("API response was None")
 
-    _logger.info(f"Sleeping 15 minutes. Next update {(datetime.now() + timedelta(minutes=15)).strftime("%H:%M")}")
+    _logger.info(f"Sleeping 15 minutes. Next update {datetime.now() + timedelta(minutes=15):%H:%M}")
     await asyncio.sleep(15 * 60)
 
 
@@ -817,8 +825,7 @@ async def update_departure() -> None:
         _logger.info("Data has been updated in departure.json")
     else:
         _logger.error("API response is None. Check for issues with the API call.")
-
-    _logger.info(f"Sleeping 4 hours. Next update {(datetime.now() + timedelta(hours=4)).strftime("%H:%M")}")
+    _logger.info(f"Sleeping 4 hours. Next update {(datetime.now() + timedelta(hours=4)).strftime('%H:%M')}")
     await asyncio.sleep(4 * 60 * 60)
 
 
