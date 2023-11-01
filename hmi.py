@@ -1,5 +1,3 @@
-# TODO: Send departure data to the gui
-# TODO: changing departure time should update in the gui
 # TODO: data should be available in hmi
 
 import bisect
@@ -178,7 +176,7 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
         data = await loop.run_in_executor(None, modbus_data_queue.get)
 
         # A: Adds a new train to the timetable in the gui.
-        # Packet: ["A", "AdvertisedTime", "EstimatedTime", "ToLocation", "Track"]
+        # Packet: ["A", "TrainId", "EstimatedTime", "ToLocation", "Track"]
 
         # a: A "status" message that a train has arrived at the station. Updates the real track status. Attack helper.
         # Packet: ["a", track]
@@ -208,15 +206,15 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
         # u: update the departure track in the json file for a specific train
         # Paket ["u", "AdvertisedTime", "track"]
 
-        # U: update the departure track in the gui
-        # Packet ["U", "AdvertisedTime", "track"]
+        # U: update the departure in the gui
+        # Packet ["U", "AdvertisedTime", EstimatedTime, "track"]
 
         # K: update the key for the gui
         # Packet ["K", b"key", b"encrypted new key"]
 
-        # TODO
         # h: inserts a new time in the json files
         # Packet ["h", "AdvertisedTimeArrival", "AdvertisedTimeDeparture", "ToLocation", Track]
+
 
         match data[0]:
             case "a":
@@ -235,14 +233,13 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                         try:
                             with open('arrival.json', 'r+') as json_file:
                                 json_data = json.load(json_file)
-                                json_data[0]["TrackAtLocation"] = str(switch_status)
+                                json_data[0]["TrackAtLocation"] = str(switch_status+1)
                                 json_file.seek(0)
                                 json.dump(json_data, json_file, indent=2)
                         except FileNotFoundError:
                             _logger.error("arrival.json isn't found")
-                    modbus_data_queue.put(["u", json_data[0]["AdvertisedTime"], str(switch_status)])
+                    modbus_data_queue.put(["u", json_data[0]["AdvertisedTime"], str(switch_status+1)])
             case "s":
-                # TODO: changing departure time should update in the gui
                 if data[1] == 2:
                     _logger.info("Received switch update from hmi")
                     switch_status = int(data[2])
@@ -256,13 +253,6 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                     update_time = (5 * switch_queue.qsize() + difference) // 60  # Convert to minutes
 
                     if data[1] == 0:
-                        async with arrival_file_mutex:
-                            try:
-                                with open("arrival.json", "r") as json_file:
-                                    json_data = json.load(json_file)
-                            except FileNotFoundError:
-                                _logger.error("Arrival.json not found")
-
                         async with departure_file_mutex:
                             with open('departure.json', 'r+') as json_file:
                                 json_data = json.load(json_file)
@@ -271,6 +261,9 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                                     minutes=update_time)).strftime("%Y-%m-%d %H:%M")
                                 json_file.seek(0)
                                 json.dump(json_data, json_file, indent=2)
+
+                        modbus_data_queue.put(["U", json_data[0]['AdvertisedTime'], json_data[0]['EstimatedTime'],
+                                               json_data[0]['TrackAtLocation']])
                     else:
                         async with arrival_file_mutex:
                             with open('arrival.json', 'r+') as json_file:
@@ -280,7 +273,6 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                                     minutes=update_time)).strftime("%Y-%m-%d %H:%M")
                                 json_file.seek(0)
                                 json.dump(json_data, json_file, indent=2)
-
             case "r":
                 _logger.info("Received removal wish")
                 async with lock:
@@ -302,7 +294,11 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                 modbus_data_queue.put(["R", data[2]])
             case "t":
                 _logger.info("Received track status update")
-                track_status[data[1]] = data[2]
+
+                if data[2] == "O":
+                    track_status[data[1]].set()
+                else:
+                    track_status.clear()
             case "u":
                 async with departure_file_mutex:
                     with open("arrival.json", "r+") as json_file:
@@ -312,13 +308,13 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                             if json_data[i]["AdvertisedTime"] == data[1]:
                                 json_data[i]["TrackAtLocation"] = data[2]
                                 modbus_data_queue.put(
-                                    ["U", json_data[i]["AdvertisedTime"], json_data[i]["TrackAtLocation"]])
+                                    ["U", json_data[i]["AdvertisedTime"], json_data[i]['EstimatedTime'], json_data[i]["TrackAtLocation"]])
 
                         json_file.seek(0)
                         json.dump(json_data, json_file, indent=2)
             case "h":
                 train_data = {'AdvertisedTime': data[1], 'EstimatedTime': data[2], 'ToLocation': data[3],
-                              'TrackAtLocation': data[4]}                
+                              'TrackAtLocation': data[4]}
                 async with departure_file_mutex:
                     with open('departure.json', 'r') as departures:
                         departure_data = json.load(departures)
@@ -332,6 +328,8 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
 
                 if insert_index == 0:
                     wake_departure.set()
+
+                modbus_data_queue.put([data[1], data[1], data[3], data[4]])
 
                 train_data = {'AdvertisedTime': data[1], 'EstimatedTime': data[2], 'TrackAtLocation': data[3]}
 
@@ -347,7 +345,6 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
 
                 if insert_index == 0:
                     wake_arrival.set()
-
             case _:
                 data_sent += 1
 
@@ -383,7 +380,7 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                             _logger.debug("Waiting for client to copy datastore; sleeping 2 second")
                             await asyncio.sleep(2)  # give the server control so it can answer the client
 
-                        if context[slave_id].getValues(func_code, 0, 32) == [prior_signature]:
+                        if context[slave_id].getValues(func_code, 0, 32) == prior_signature:
                             break
 
                         _logger.warning("Wrong signature tried to validate data in the holding register")
@@ -667,7 +664,7 @@ async def update_arrival() -> None:
     """Updates arrival.json every 15 minutes with new trains and update estimated time for all the trains"""
     xml_arrival = """<REQUEST>
                 <LOGIN authenticationkey='eb2fa89aebd243cb9cba7068aac73244'/> 
-                <QUERY objecttype='TrainAnnouncement' orderby='AdvertisedTimeAtLocation' schemaversion='1'>
+                <QUERY objecttype='TrainAnnouncement' orderby='AdvertisedTimeAtLocation' schemaversion='1.8'>
                     <FILTER>
                         <AND>
                             <OR>
@@ -731,7 +728,7 @@ async def update_arrival() -> None:
                     train_data = {
                         'AdvertisedTime': advertised_time,
                         'EstimatedTime': estimated_time,
-                        'TrackAtLocation': new_train_info['TrackAtLocation']
+                        'TrackAtLocation': new_train_info['TrackAtLocation'],
                     }
 
                     new_formatted_data.append(train_data)
@@ -753,15 +750,15 @@ async def update_arrival() -> None:
 
 
 async def update_departure() -> None:
-    """Updates departure.json every 4 hour, won't remove anything just update with new trains"""
+    """Updates departure.json every 4 hours, won't remove anything just update with new trains"""
     xml_departure = """<REQUEST>
     <LOGIN authenticationkey='eb2fa89aebd243cb9cba7068aac73244'/> 
-    <QUERY objecttype='TrainAnnouncement' orderby='AdvertisedTimeAtLocation' schemaversion='1'>
+    <QUERY objecttype='TrainAnnouncement' orderby='AdvertisedTimeAtLocation' schemaversion='1.8'>
         <FILTER>
             <AND>
                 <OR>
                     <AND>
-                        <GT name='AdvertisedTimeAtLocation' value='$dateadd(-00:15:00)' /> 
+                        <GT name='AdvertisedTimeAtLocation' value='$dateadd(00:00:00)' /> 
                         <LT name='AdvertisedTimeAtLocation' value='$dateadd(08:00:00)' />
                     </AND>
                     <GT name='EstimatedTimeAtLocation' value='$now' />
@@ -772,7 +769,7 @@ async def update_departure() -> None:
         </FILTER>
         <INCLUDE>AdvertisedTimeAtLocation</INCLUDE>
         <INCLUDE>TrackAtLocation</INCLUDE>
-        <INCLUDE>ToLocation</INCLUDE>
+        <INCLUDE>ToLocation</INCLUDE>   
     </QUERY>
     </REQUEST>"""
 
@@ -783,6 +780,10 @@ async def update_departure() -> None:
         new_entries = [new_train for new_train in new_data
                        if not any(existing_train['AdvertisedTime'] == new_train['AdvertisedTime']
                                   for existing_train in existing_data) and new_train['TrackAtLocation'] != "-"]
+
+        for new_train in new_entries:
+            modbus_data_queue.put(["A", new_train['AdvertisedTime'], new_train['EstimatedTime'],
+                                   new_train['ToLocation'], int(new_train['Track'])])
 
         # Combine existing data and new entries
         updated_data = existing_data + new_entries
@@ -816,16 +817,14 @@ async def update_departure() -> None:
                 new_train_info.get('EstimatedTimeAtLocation', new_train_info['AdvertisedTimeAtLocation']),
                 "%Y-%m-%dT%H:%M:%S.%f%z").strftime("%Y-%m-%d %H:%M")
 
-            to_location = ["Köpenhamn" if "Dk.kh" in new_train_info.get("ToLocation", []) else "Emmaboda"]
+            to_location = "Köpenhamn" if any(location.get('LocationName') == 'Dk.kh' for location in new_train_info.get("ToLocation", [])) else "Emmaboda"
 
-            track_at_location = new_train_info.get('TrackAtLocation', '')
-
-            if track_at_location != "-":
+            if new_train_info['TrackAtLocation'] != "-":
                 train_data = {
                     'AdvertisedTime': advertised_time,
                     'EstimatedTime': estimated_time,
                     'ToLocation': to_location,
-                    'TrackAtLocation': track_at_location
+                    'TrackAtLocation': new_train_info['TrackAtLocation']
                 }
 
                 new_formatted_data.append(train_data)
