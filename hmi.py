@@ -380,19 +380,19 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                             _logger.debug("Waiting for client to copy datastore; sleeping 2 second")
                             await asyncio.sleep(2)  # give the server control so it can answer the client
 
-                        if context[slave_id].getValues(func_code, 0, 32) == [prior_signature]:
+                        if context[slave_id].getValues(func_code, 0, 64) == [prior_signature]:
                             break
 
                         _logger.warning("Wrong signature tried to validate data in the holding register")
                         context[slave_id].setValues(func_code, address, prior_data)
                         _logger.info("Resetting flag")
-                        context[slave_id].setValues(func_code, datastore_size - 2, [1])
+                        context[slave_id].setValues(func_code, datastore_size - 2, [0])
 
                 _logger.debug("Client has read data from datastore, writing new data")
                 context[slave_id].setValues(func_code, address, data)
 
                 _logger.info("Resetting flag")
-                context[slave_id].setValues(func_code, datastore_size - 2, [1])
+                context[slave_id].setValues(func_code, datastore_size - 2, [0])
 
                 prior_data = data
                 prior_signature = expected_signature
