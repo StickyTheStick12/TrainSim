@@ -44,7 +44,7 @@ last_acquired_switch = datetime.now() - timedelta(minutes=5)
 departure_event = asyncio.Event()
 arrival_event = asyncio.Event()
 
-wake_arrival = asyncio.Event() 
+wake_arrival = asyncio.Event()
 wake_departure = asyncio.Event()
 
 track1 = asyncio.Event()
@@ -390,7 +390,13 @@ async def departure() -> None:
 
             # Calculate the time difference until the estimated departure time and sleep until 5 minutes before arrival
             difference = estimated_time - datetime.now()
-            await asyncio.sleep((difference.total_seconds() - 5 * 60))
+
+            _, pending = await asyncio.wait([asyncio.sleep(max(0, difference.total_seconds() - 5 * 60)), wake_departure.wait()],
+                                            return_when=asyncio.FIRST_COMPLETED)
+
+            if wake_departure.is_set():
+                wake_departure.clear()
+                continue
 
             # Check if the train has already been sent away
             async with lock:
@@ -491,7 +497,12 @@ async def arrival() -> None:
             difference = (estimated_time - datetime.now()).total_seconds()
 
             # Sleep until 5 minutes before estimated time
-            await asyncio.sleep(max(0, difference - 5 * 60))
+            _, pending = await asyncio.wait([asyncio.sleep(max(0, difference - 5 * 60)), wake_arrival.wait()],
+                                            return_when=asyncio.FIRST_COMPLETED)
+
+            if wake_arrival.is_set():
+                wake_arrival.clear()
+                continue
 
             # Retrieve the track number from the JSON data
             track_number = int(first_entry['TrackAtLocation'])
@@ -517,7 +528,8 @@ async def arrival() -> None:
 
                     # await the departure of a train to be able to get a track
                     _logger.info("No track available. Waiting for a clear track")
-                    _, pending = await asyncio.wait([track_status[0].wait, track_status[1].wait],
+                    # TODO fix for 6 tracks
+                    _, pending = await asyncio.wait([track_status[0].wait(), track_status[1].wait()],
                                                     return_when=asyncio.FIRST_COMPLETED)
 
                     _logger.info("Track found")
