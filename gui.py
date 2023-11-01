@@ -181,6 +181,7 @@ def modbus_client_thread() -> None:
         """Reads data from holding register"""
         nonlocal client
         secret_key = b"b$0!9Lp^z2QsE1Yf"
+        data_recevied = 0
 
         try:
             while True:
@@ -191,21 +192,24 @@ def modbus_client_thread() -> None:
                     hold_register = await client.read_holding_registers(0x00, datastore_size - 3, slave=1)
 
                     if not hold_register.isError():
+                        data_recevied += 1
                         amount_to_read = hold_register.registers[0]
 
-                        data = "".join(chr(char) for char in hold_register.registers[1:1+amount_to_read+36])
+                        received_data = "".join(
+                            chr(char) for char in hold_register.registers[1:1 + amount_to_read + 36])
 
-                        signature = data[1+amount_to_read+5:]
-                        nonce = data[1+amount_to_read+1:1+amount_to_read+1+2]
+                        nonce = received_data[1 + amount_to_read:1 + amount_to_read + 2]
 
-                        data = data[1:amount_to_read].split(" ")
+                        signature = received_data[1 + amount_to_read + 5:]
+
+                        data = received_data[1:amount_to_read + 1].split(" ")
 
                         # verify signature
                         sha256 = hashlib.sha256()
-                        calc_signature = data + secret_key.decode("utf-8")
+                        calc_signature = data + secret_key.decode("utf-8") + str(data_recevied)
                         sha256.update(calc_signature.encode("utf-8"))
                         calc_signature = sha256.hexdigest()
-
+                        
                         if(signature == calc_signature):
                             # calculate new signature for nonce
                             sha256 = hashlib.sha256()
@@ -223,6 +227,7 @@ def modbus_client_thread() -> None:
 
                             _logger.debug(f"received {data}")
 
+
                             # update secret_key
                             func_code = data[1]
 
@@ -230,6 +235,7 @@ def modbus_client_thread() -> None:
                                 cipher = Fernet(secret_key)
                                 secret_key = cipher.decrypt(data)
                                 _logger.info("Updated key")
+                                data_recevied = 0
                             else:
                                 _logger.info("Verified signature on data, notified gui.")
                                 # put data in queue for the GUI thread
