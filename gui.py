@@ -206,11 +206,11 @@ def modbus_client_thread() -> None:
 
                         # verify signature
                         sha256 = hashlib.sha256()
-                        calc_signature = data + secret_key.decode("utf-8") + str(data_recevied)
+                        calc_signature = "".join(data) + secret_key.decode("utf-8") + str(data_recevied)
                         sha256.update(calc_signature.encode("utf-8"))
                         calc_signature = sha256.hexdigest()
 
-                        if (signature == calc_signature):
+                        if signature == calc_signature:
                             # calculate new signature for nonce
                             sha256 = hashlib.sha256()
                             calc_signature = nonce + secret_key.decode("utf-8")
