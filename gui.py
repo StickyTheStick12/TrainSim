@@ -195,22 +195,22 @@ def modbus_client_thread() -> None:
                         data_recevied += 1
                         amount_to_read = hold_register.registers[0]
 
-                        received_data = "".join(
-                            chr(char) for char in hold_register.registers[1:1 + amount_to_read + 36])
+                        received_data = "".join(chr(char) for char in hold_register.registers[1:1 + amount_to_read + 1
+                                                                                                + 2 + 1 + 64])
 
-                        nonce = received_data[1 + amount_to_read:1 + amount_to_read + 2]
+                        nonce = received_data[1 + amount_to_read:1 + amount_to_read+2]
 
-                        signature = received_data[1 + amount_to_read + 5:]
+                        signature = received_data[1+amount_to_read+3:]
 
-                        data = received_data[1:amount_to_read + 1].split(" ")
+                        data = received_data[:amount_to_read].split(" ")
 
                         # verify signature
                         sha256 = hashlib.sha256()
                         calc_signature = data + secret_key.decode("utf-8") + str(data_recevied)
                         sha256.update(calc_signature.encode("utf-8"))
                         calc_signature = sha256.hexdigest()
-                        
-                        if(signature == calc_signature):
+
+                        if (signature == calc_signature):
                             # calculate new signature for nonce
                             sha256 = hashlib.sha256()
                             calc_signature = nonce + secret_key.decode("utf-8")
@@ -226,7 +226,6 @@ def modbus_client_thread() -> None:
                             #   await client.write_register(i, calc_signature[i], slave=1)
 
                             _logger.debug(f"received {data}")
-
 
                             # update secret_key
                             func_code = data[1]
