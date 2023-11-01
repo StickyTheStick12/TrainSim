@@ -1,3 +1,6 @@
+import hashlib
+from cryptography.fernet import Fernet
+
 import customtkinter as ctk
 from pymodbus.client import AsyncModbusTlsClient
 from pymodbus.transaction import ModbusTlsFramer
@@ -12,7 +15,7 @@ _logger = logging.getLogger(__file__)
 _logger.setLevel("WARNING")
 
 # Modbus variables
-datastore_size = 41  # needs to be the same size as the server, max 125 though
+datastore_size = 110  # needs to be the same size as the server, max 125 though
 path_to_cert = "/home/vboxuser/tls/cert.pem"
 path_to_key = "/home/vboxuser/tls/key.pem"
 host = "localhost"
@@ -128,13 +131,15 @@ class TrainStation(ctk.CTk):
 
             match data[1]:
                 case "A":
+                    # the advertised departure times will be sorted when they arrive. When we receive a update to the time we will check for the advertised time and find correct entry to change
+
                     self.add_data_timetable(int(data[0]), data[2:])  # (index)1, [(Train)'1', '09:00', (Track)'1'])
                 case "R":
                     self.remove_data_timetable(int(data[0]))  # (index) 1
                 case "T":
                     self.update_data_tracks(int(data[0]), data[2])  # (track) 1, (status) "occupied"
 
-        self.after(500, self.process_modbus_data)
+        self.after(1000, self.process_modbus_data)
 
 
 def modbus_client_thread() -> None:
@@ -175,6 +180,8 @@ def modbus_client_thread() -> None:
     async def read_holding_register() -> None:
         """Reads data from holding register"""
         nonlocal client
+        secret_key = b"b$0!9Lp^z2QsE1Yf"
+
         try:
             while True:
                 # poll the flag bit to see if new information has been written
@@ -184,34 +191,56 @@ def modbus_client_thread() -> None:
                     hold_register = await client.read_holding_registers(0x00, datastore_size - 3, slave=1)
 
                     if not hold_register.isError():
-                        # 10 1 A gffff 15:15 1
-                          amount_to_read = hold_register.registers[0]
-                        idx = hold_register.registers[1]
-                        data = "".join([chr(char) for char in hold_register.registers[2:2 + amount_to_read]]).split(" ")
+                        amount_to_read = hold_register.registers[0]
 
-                        if len(data) > 4:
-                            func_code = data[0]
-                            name = " ".join(data[1:-2])
-                            data = [idx] + [func_code] + [name]+ [data[-2]] + [data[-1]]
-                        else:
-                            data = [idx] + data
-                        
-                        _logger.debug(f"received {data}")
-                        _logger.debug("Resetting flag")
-                        await client.write_register(datastore_size - 2, 1, slave=1)
+                        data = "".join(chr(char) for char in hold_register.registers[1:1+amount_to_read+36])
 
-                        # put data in queue for the GUI thread
-                        modbus_data_queue.put(data)
+                        signature = data[1+amount_to_read+5:]
+                        nonce = data[1+amount_to_read+1:1+amount_to_read+1+2]
+
+                        data = data[1:amount_to_read].split(" ")
+
+                        # verify signature
+                        sha256 = hashlib.sha256()
+                        calc_signature = data + secret_key.decode("utf-8")
+                        sha256.update(calc_signature.encode("utf-8"))
+                        calc_signature = sha256.hexdigest()
+
+                        if(signature == calc_signature):
+                            # calculate new signature for nonce
+                            sha256 = hashlib.sha256()
+                            calc_signature = nonce + secret_key.decode("utf-8")
+                            sha256.update(calc_signature.encode("utf-8"))
+                            calc_signature = sha256.hexdigest()
+
+                            await client.write_registers(0x00, calc_signature, slave=1)
+
+                            _logger.debug("Resetting flag")
+                            await client.write_register(datastore_size - 2, 1, slave=1)
+
+                            # for i in range(len(calc_signature)):
+                            #   await client.write_register(i, calc_signature[i], slave=1)
+
+                            _logger.debug(f"received {data}")
+
+                            # update secret_key
+                            func_code = data[1]
+
+                            if func_code == "K":
+                                cipher = Fernet(secret_key)
+                                secret_key = cipher.decrypt(data)
+                                _logger.info("Updated key")
+                            else:
+                                _logger.info("Verified signature on data, notified gui.")
+                                # put data in queue for the GUI thread
+                                modbus_data_queue.put(data[:-3])
                     else:
                         _logger.error("Error reading holding register")
 
-                _logger.debug("sleeping for 0.5 second")
-                await asyncio.sleep(0.5)
+                _logger.debug("sleeping for 1 second")
+                await asyncio.sleep(1)
         except ModbusException as exc:
             _logger.error(f"Received ModbusException({exc}) from library")
-            client.close()
-        except KeyboardInterrupt:
-            _logger.info("Keyboard interrupt received. Exiting.")
             client.close()
 
     loop.run_until_complete(run_client())
@@ -226,4 +255,3 @@ if __name__ == "__main__":
     # Initialize the Train Station HMI
     train_station_hmi = TrainStation()
     train_station_hmi.after(1000, train_station_hmi.process_modbus_data)
-    train_station_hmi.mainloop()
