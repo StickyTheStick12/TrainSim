@@ -317,7 +317,8 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                         json_file.seek(0)
                         json.dump(json_data, json_file, indent=2)
             case "h":
-                train_data = {'AdvertisedTime': data[1], 'EstimatedTime': data[2], 'ToLocation': data[3]}
+                train_data = {'AdvertisedTime': data[1], 'EstimatedTime': data[2], 'ToLocation': data[3],
+                              'TrackAtLocation': data[4]}                
                 async with departure_file_mutex:
                     with open('departure.json', 'r') as departures:
                         departure_data = json.load(departures)
@@ -328,12 +329,12 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                 async with departure_file_mutex:
                     with open('departure.json', 'w') as departures:
                         json.dump(departure_data, departures, indent=2)
-                
+
                 if insert_index == 0:
                     wake_departure.set()
-                
+
                 train_data = {'AdvertisedTime': data[1], 'EstimatedTime': data[2], 'TrackAtLocation': data[3]}
-                
+
                 async with arrival_file_mutex:
                     with open('arrival.json', 'r') as arrivals:
                         arrival_data = json.load(arrivals)
@@ -343,10 +344,10 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                 async with arrival_file_mutex:
                     with open('arrival.json', 'w') as arrivals:
                         json.dump(arrival_data, arrivals, indent=2)
-                
+
                 if insert_index == 0:
                     wake_arrival.set()
-                
+
             case _:
                 data_sent += 1
 
