@@ -212,6 +212,10 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
 
         # K: update the key for the gui
         # Packet ["K", b"key", b"encrypted new key"]
+        
+        # TODO
+        # h: inserts a new time in the json files
+        # Packet ["h", "AdvertisedTimeArrival", "AdvertisedTimeDeparture", "ToLocation", Track] 
 
         match data[0]:
             case "a":
@@ -310,6 +314,17 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
 
                         json_file.seek(0)
                         json.dump(json_data, json_file, indent=2)
+            case "h":
+                # logic here
+                #  Datan behöver vara i sorterad ordning så ifall du placerar den först i listan så kommer du behöva använda denna koden
+                
+                wake_arrival.set() # ifall du sätter den överst i arrival.json
+                wake_departure.set() # ifall du sätter den överst i departure.json
+                
+                
+        
+        
+        
             case _:
                 data_sent += 1
 
