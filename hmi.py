@@ -263,20 +263,22 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                             except FileNotFoundError:
                                 _logger.error("Arrival.json not found")
 
-                        json_data[0]["EstimatedTime"] = (
-                                datetime.strptime(json_data[0]["EstimatedTime"], "%Y-%m-%d %H:%M") + timedelta(
-                            minutes=update_time)).strftime("%Y-%m-%d %H:%M")
-
                         async with departure_file_mutex:
                             with open('departure.json', 'r+') as json_file:
                                 json_data = json.load(json_file)
-                                json_data[0]["EstimatedTime"] = formatted_time.strftime("%Y-%m-%d %H:%M")
+                                json_data[0]["EstimatedTime"] = (
+                                        datetime.strptime(json_data[0]["EstimatedTime"], "%Y-%m-%d %H:%M") + timedelta(
+                                    minutes=update_time)).strftime("%Y-%m-%d %H:%M")
+                                json_file.seek(0)
                                 json.dump(json_data, json_file, indent=2)
                     else:
                         async with arrival_file_mutex:
                             with open('arrival.json', 'r+') as json_file:
                                 json_data = json.load(json_file)
-                                json_data[0]["EstimatedTime"] = formatted_time
+                                json_data[0]["EstimatedTime"] = (
+                                        datetime.strptime(json_data[0]["EstimatedTime"], "%Y-%m-%d %H:%M") + timedelta(
+                                    minutes=update_time)).strftime("%Y-%m-%d %H:%M")
+                                json_file.seek(0)
                                 json.dump(json_data, json_file, indent=2)
 
             case "r":
@@ -295,9 +297,9 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                         json.dump(json_data, json_file, indent=2)
 
                 # clear track
-                track_status[data[1]].clear()
-                real_track_status[data[1]] = "A"
-                modbus_data_queue.put("R", data[2])
+                track_status[data[1]-1].clear()
+                real_track_status[data[1]-1] = "A"
+                modbus_data_queue.put(["R", data[2]])
             case "t":
                 _logger.info("Received track status update")
                 track_status[data[1]] = data[2]
@@ -322,16 +324,29 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                 existing_times = [item['AdvertisedTime'] for item in departure_data]
                 insert_index = bisect.bisect_left(existing_times, train_data['AdvertisedTime'])
 
-                if insert_index == 0:
-                    wake_departure.set()
-
                 departure_data.insert(insert_index, train_data)
                 async with departure_file_mutex:
                     with open('departure.json', 'w') as departures:
                         json.dump(departure_data, departures, indent=2)
-
-                wake_arrival.set()  # ifall du sätter den överst i arrival.json
-
+                
+                if insert_index == 0:
+                    wake_departure.set()
+                
+                train_data = {'AdvertisedTime': data[1], 'EstimatedTime': data[2], 'TrackAtLocation': data[3]}
+                
+                async with arrival_file_mutex:
+                    with open('arrival.json', 'r') as arrivals:
+                        arrival_data = json.load(arrivals)
+                existing_times = [item['AdvertisedTime'] for item in arrival_data]
+                insert_index = bisect.bisect_left(existing_times, train_data['AdvertisedTime'])
+                arrival_data.insert(insert_index, train_data)
+                async with arrival_file_mutex:
+                    with open('arrival.json', 'w') as arrivals:
+                        json.dump(arrival_data, arrivals, indent=2)
+                
+                if insert_index == 0:
+                    wake_arrival.set()
+                
             case _:
                 data_sent += 1
 
