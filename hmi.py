@@ -55,7 +55,7 @@ track5 = asyncio.Event()
 track6 = asyncio.Event()
 
 track_status = [track1, track2, track3, track4, track5, track6]  # this is the track_status that the trains use when deciding on a track.
-real_track_status = ["Available"]*6  # this is the actual representation if a track is available or not (attack control)
+real_track_status = ["A"]*6  # this is the actual representation if a track is available or not (attack control)
 
 switch_status = 1  # 0 - 6
 
@@ -140,8 +140,8 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                 json_data = json.load(json_file)
         except FileNotFoundError:
             _logger.error("Couldn't find arrival.json file")
-    
-    # TODO
+
+    # TODO debug
     current_time = datetime.now()
     entries_to_remove = 0
     for entry in json_data[:2]:
@@ -150,7 +150,7 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
 
         # Check if the estimated time is less than the current time
         if estimated_time < current_time:
-            real_track_status[int(entry['TrackAtLocation'])] = "Occupied"
+            real_track_status[int(entry['TrackAtLocation'])] = "O"
             track_status[int(entry['TrackAtLocation'])].set()
             entries_to_remove += 1
         else:
@@ -189,7 +189,7 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
         # S: Sends the new status of the switch to the gui.
         # Packet: ["S", "switch_status"]
 
-        # r: Removes a train from the station. Checks whether the switch was in the correct posititon or not
+        # r: Removes a train from the station. Checks whether the switch was in the correct position or not
         # Packet ["r", track, "AdvertisedTime"]
 
         # R: sends a remove train message to the gui.
@@ -217,22 +217,24 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
             case "a":
                 _logger.info("Received arrival update from a train")
 
-                if real_track_status[switch_status] == "occupied":
+                if real_track_status[switch_status] == "O":
                     # we have a crash since we tried to drive into a already occupied track
                     modbus_data_queue.put(["P", "A train collided while trying to drive into the station"])
                 else:
-                    real_track_status[switch_status] = "occupied"
+                    real_track_status[switch_status] = "O"
 
                 if switch_status != data[1]:
                     _logger.info("Updating track in json, due to switch being to another track")
 
                     async with arrival_file_mutex:
-                        with open('arrival.json', 'r+') as json_file:
-                            json_data = json.load(json_file)
-                            json_data[0]["TrackAtLocation"] = str(switch_status)
-                            json_file.seek(0)
-                            json.dump(json_data, json_file, indent=2)
-
+                        try:
+                            with open('arrival.json', 'r+') as json_file:
+                                json_data = json.load(json_file)
+                                json_data[0]["TrackAtLocation"] = str(switch_status)
+                                json_file.seek(0)
+                                json.dump(json_data, json_file, indent=2)
+                        except FileNotFoundError:
+                            _logger.error("arrival.json isn't found")
                     modbus_data_queue.put(["u", json_data[0]["AdvertisedTime"], str(switch_status)])
             case "s":
                 # TODO: changing departure time should update in the gui
@@ -253,8 +255,11 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
 
                     if data[1] == 0:
                         async with arrival_file_mutex:
-                            with open("arrival.json", "r") as json_file:
-                                json_data = json.load(json_file)
+                            try:
+                                with open("arrival.json", "r") as json_file:
+                                    json_data = json.load(json_file)
+                            except FileNotFoundError:
+                                _logger.error("Arrival.json not found")
 
                         if formatted_time <= json_data[0]:
                             formatted_time = json_data[0] + timedelta(minutes=5)
@@ -288,9 +293,10 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
 
                 # clear track
                 track_status[data[1]].clear()
-                real_track_status[data[1]] = "available"
+                real_track_status[data[1]] = "A"
                 modbus_data_queue.put("R", data[2])
             case "t":
+                _logger.info("Received track status update")
                 track_status[data[1]] = data[2]
             case "u":
                 async with departure_file_mutex:
@@ -356,6 +362,7 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                 prior_signature = expected_signature
 
                 if data_sent == 100:
+                    _logger.info("Updating secret key")
                     await update_keys(secret_key)
                     data_sent = 0
 
@@ -396,12 +403,13 @@ async def departure() -> None:
             # Calculate the time difference until the estimated departure time and sleep until 5 minutes before arrival
             difference = estimated_time - datetime.now()
 
-            _, pending = await asyncio.wait([asyncio.sleep(max(0, difference.total_seconds() - 5 * 60)), wake_departure.wait()],
-                                            return_when=asyncio.FIRST_COMPLETED)
-
-            if wake_departure.is_set():
+            # Use asyncio.wait with tasks
+            try:
+                await asyncio.wait_for(wake_departure.wait(), timeout=max(0, difference.total_seconds() - 5 * 60))
                 wake_departure.clear()
                 continue
+            except asyncio.TimeoutError:
+                pass
 
             # Check if the train has already been sent away
             async with lock:
@@ -439,6 +447,7 @@ async def departure() -> None:
                 # Check if the estimated time has been updated or if the current time is greater than the estimated time
                 if updated_estimated_time > estimated_time or datetime.now() > updated_estimated_time:
                     # Wait 20 seconds before leaving
+                    _logger.info("Train is late, leaving in 20 seconds")
                     await asyncio.sleep(20)
 
                     async with lock:
@@ -479,7 +488,7 @@ async def departure() -> None:
                         with open('departure.json', 'w') as json_file:
                             json_file.write(json.dumps(json_data, indent=2))
         else:
-            _logger.error("No entry found in json file: departure.json")
+            _logger.error("No entry found in departure.json")
 
 
 async def arrival() -> None:
@@ -499,15 +508,14 @@ async def arrival() -> None:
             estimated_time = datetime.strptime(first_entry['EstimatedTime'], "%Y-%m-%d %H:%M")
 
             # Calculate the time difference between estimated time and current time
-            difference = (estimated_time - datetime.now()).total_seconds()
+            difference = estimated_time - datetime.now()
 
-            # Sleep until 5 minutes before estimated time
-            _, pending = await asyncio.wait([asyncio.sleep(max(0, difference - 5 * 60)), wake_arrival.wait()],
-                                            return_when=asyncio.FIRST_COMPLETED)
-
-            if wake_arrival.is_set():
+            try:
+                await asyncio.wait_for(wake_arrival.wait(), timeout=max(0, difference.total_seconds() - 5 * 60))
                 wake_arrival.clear()
                 continue
+            except asyncio.TimeoutError:
+                pass
 
             # Retrieve the track number from the JSON data
             track_number = int(first_entry['TrackAtLocation'])
@@ -516,15 +524,15 @@ async def arrival() -> None:
                 # If the track is available, occupy it and update track status
                 _logger.info("Track was available for arrival")
                 modbus_data_queue.put(["s", 1, str(track_number), first_entry['AdvertisedTime']])
-                modbus_data_queue.put(["t", track_number, "occupied"])
+                modbus_data_queue.put(["t", track_number, "O"])
             else:
-                for i in range(1, 7):
-                    if not track_status[(i-1) % 2].is_set():
+                for i in range(6):
+                    if not track_status[i].is_set():
                         # If the alternate track is available, occupy it and update track status
                         _logger.info("Original track wasn't available, chose another track instead")
-                        track_number = (i - 1) % 2 + 1
+                        track_number = i+1
                         json_data[0]['TrackAtLocation'] = str(track_number)
-                        modbus_data_queue.put(["t", track_number, "occupied"])
+                        modbus_data_queue.put(["t", track_number, "O"])
                         modbus_data_queue.put(["s", 1, str(track_number), first_entry['AdvertisedTime']])
 
                         # Update the track information in depafirture
@@ -536,7 +544,7 @@ async def arrival() -> None:
                     _, pending = await asyncio.wait([track_status[i].wait() for i in range(6)],
                                                     return_when=asyncio.FIRST_COMPLETED)
 
-                    _logger.info("Track found")
+                    _logger.info("A track is available")
                     for event in pending:
                         event.clear()
 
@@ -544,7 +552,7 @@ async def arrival() -> None:
                     # If the track is available, occupy it and update track status
                     _logger.info("Track was available for arrival")
                     modbus_data_queue.put(["s", 1, str(track_number), first_entry['AdvertisedTime']])
-                    modbus_data_queue.put(["t", track_number, "occupied"])
+                    modbus_data_queue.put(["t", track_number, "O"])
                 else:
                     for i in range(6):
                         if not track_status[i].is_set():
@@ -552,7 +560,7 @@ async def arrival() -> None:
                             _logger.info("Original track wasn't available, chose another track instead")
                             track_number = i+1
                             json_data[0]['TrackAtLocation'] = str(track_number)
-                            modbus_data_queue.put(["t", track_number, "occupied"])
+                            modbus_data_queue.put(["t", track_number, "O"])
                             modbus_data_queue.put(["s", 1, str(track_number), first_entry['AdvertisedTime']])
 
                             # Update the track information in depafirture
