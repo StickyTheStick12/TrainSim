@@ -1,9 +1,7 @@
 # TODO: Send departure data to the gui
 # TODO: changing departure time should update in the gui
-# TODO: should remove all entries in the file at the beginning of running so we dont have old data left.
 # TODO: data should be available in hmi
-# TODO: change so we have 6 track
-# TODO: fix departure.json and arrival.json for correct track, and correct location
+# TODO: should be able to add a new train
 
 import json
 from datetime import datetime, timedelta
@@ -13,6 +11,7 @@ import logging
 import requests
 import hashlib
 import secrets
+import os
 
 from pymodbus import __version__ as pymodbus_version
 from pymodbus.datastore import (
@@ -45,14 +44,20 @@ last_acquired_switch = datetime.now() - timedelta(minutes=5)
 departure_event = asyncio.Event()
 arrival_event = asyncio.Event()
 
+wake_arrival = asyncio.Event() 
+wake_departure = asyncio.Event()
+
 track1 = asyncio.Event()
 track2 = asyncio.Event()
+track3 = asyncio.Event()
+track4 = asyncio.Event()
+track5 = asyncio.Event()
+track6 = asyncio.Event()
 
-track_status = [track1, track2]  # this is the track_status that the trains use when deciding on a track.
-real_track_status = [
-    "Available", "Available"]  # this is the actual representation if a track is available or not (attack control)
+track_status = [track1, track2, track3, track4, track5, track6]  # this is the track_status that the trains use when deciding on a track.
+real_track_status = ["Available"]*6  # this is the actual representation if a track is available or not (attack control)
 
-switch_status = 1  # 0 or 1
+switch_status = 1  # 0 - 6
 
 modbus_data_queue = multiprocessing.Queue()
 
@@ -114,10 +119,18 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
     data_sent = 0
     secret_key = b"b$0!9Lp^z2QsE1Yf"
 
+    # overwrite old data in json file
+    try:
+        os.remove("departure.json")
+        os.remove("arrival.json")
+    except FileNotFoundError:
+        pass
+
     # we then start the tasks and this process continues with the above things
     loop.create_task(update_departure())
     loop.create_task(update_arrival())
 
+    # wait so we have time to update the json files
     await asyncio.sleep(10)
 
     async with arrival_file_mutex:
@@ -300,8 +313,7 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                     signature = data + temp.decode("utf-8")
                 else:
                     data = " ".join(str(value) for value in data)
-                    signature = data + secret_key.decode("utf-8")
-
+                    signature = data + secret_key.decode("utf-8") + str(data_sent)
 
                 sha256.update(signature.encode("utf-8"))
                 signature = sha256.hexdigest()
@@ -368,7 +380,6 @@ async def departure() -> None:
 
                 async with lock:
                     train_sent_away = False
-
         except (FileNotFoundError, json.JSONDecodeError):
             _logger.error("Cannot find or decode file")
 
@@ -490,24 +501,28 @@ async def arrival() -> None:
                 _logger.info("Track was available for arrival")
                 modbus_data_queue.put(["s", 1, str(track_number), first_entry['AdvertisedTime']])
                 modbus_data_queue.put(["t", track_number, "occupied"])
-            elif not track_status[(track_number - 1) % 2].is_set():
-                # If the alternate track is available, occupy it and update track status
-                _logger.info("Original track wasn't available, chose the other track instead")
-                track_number = (track_number - 1) % 2 + 1
-                json_data[0]['TrackAtLocation'] = str(track_number)
-                modbus_data_queue.put(["t", track_number, "occupied"])
-                modbus_data_queue.put(["s", 1, str(track_number), first_entry['AdvertisedTime']])
+            else:
+                for i in range(1, 7):
+                    if not track_status[(i-1) % 2].is_set():
+                        # If the alternate track is available, occupy it and update track status
+                        _logger.info("Original track wasn't available, chose another track instead")
+                        track_number = (i - 1) % 2 + 1
+                        json_data[0]['TrackAtLocation'] = str(track_number)
+                        modbus_data_queue.put(["t", track_number, "occupied"])
+                        modbus_data_queue.put(["s", 1, str(track_number), first_entry['AdvertisedTime']])
 
-                # Update the track information in depafirture
-                modbus_data_queue.put(["U", first_entry['AdvertisedTime'], str(track_number)])
-            else:  # await the departure of a train to be able to get a track
-                _logger.info("No track available. Waiting for a clear track")
-                _, pending = await asyncio.wait([track_status[0].wait, track_status[1].wait],
-                                                return_when=asyncio.FIRST_COMPLETED)
+                        # Update the track information in depafirture
+                        modbus_data_queue.put(["U", first_entry['AdvertisedTime'], str(track_number)])
+                        break
 
-                _logger.info("Track found")
-                for event in pending:
-                    event.clear()
+                    # await the departure of a train to be able to get a track
+                    _logger.info("No track available. Waiting for a clear track")
+                    _, pending = await asyncio.wait([track_status[0].wait, track_status[1].wait],
+                                                    return_when=asyncio.FIRST_COMPLETED)
+
+                    _logger.info("Track found")
+                    for event in pending:
+                        event.clear()
 
                 if not track_status[track_number - 1].is_set():
                     # If the track is available, occupy it and update track status
@@ -515,15 +530,18 @@ async def arrival() -> None:
                     modbus_data_queue.put(["s", 1, str(track_number), first_entry['AdvertisedTime']])
                     modbus_data_queue.put(["t", track_number, "occupied"])
                 else:
-                    # If the alternate track is available, occupy it and update track status
-                    _logger.info("Original track wasn't available, chose the other track instead")
-                    track_number = (track_number - 1) % 2 + 1
-                    json_data[0]['TrackAtLocation'] = str(track_number)
-                    modbus_data_queue.put(["t", track_number, "occupied"])
-                    modbus_data_queue.put(["s", 1, str(track_number), first_entry['AdvertisedTime']])
+                    for i in range(6):
+                        if not track_status[(i - 1) % 2].is_set():
+                            # If the alternate track is available, occupy it and update track status
+                            _logger.info("Original track wasn't available, chose another track instead")
+                            track_number = (i - 1) % 2 + 1
+                            json_data[0]['TrackAtLocation'] = str(track_number)
+                            modbus_data_queue.put(["t", track_number, "occupied"])
+                            modbus_data_queue.put(["s", 1, str(track_number), first_entry['AdvertisedTime']])
 
-                    # Update the track information in depafirture
-                    modbus_data_queue.put(["U", first_entry['AdvertisedTime'], str(track_number)])
+                            # Update the track information in depafirture
+                            modbus_data_queue.put(["U", first_entry['AdvertisedTime'], str(track_number)])
+                            break
 
             # Wait for the arrival event
             await arrival_event.wait()
@@ -592,7 +610,7 @@ async def update_arrival() -> None:
                             <OR>
                                 <AND>
                                     <GT name='AdvertisedTimeAtLocation' value='$dateadd(00:00:00)' /> 
-                                    <LT name='AdvertisedTimeAtLocation' value='$dateadd(14:00:00)' />
+                                    <LT name='AdvertisedTimeAtLocation' value='$dateadd(02:00:00)' />
                                 </AND>
                                 <GT name='EstimatedTimeAtLocation' value='$now' />
                             </OR>
@@ -645,18 +663,12 @@ async def update_arrival() -> None:
                 new_train_info.get('EstimatedTimeAtLocation', new_train_info['AdvertisedTimeAtLocation']),
                 "%Y-%m-%dT%H:%M:%S.%f%z").strftime("%Y-%m-%d %H:%M")
             if datetime.now().hour <= int(advertised_time.split()[1].split(":")[0]):
-                if new_train_info.get('TrackAtLocation') == "1":
-                    track_at_location = "0"
-                elif new_train_info.get('TrackAtLocation') == "2":
-                    track_at_location = "1"
-                else:
-                    continue  # Skip entries with other TrackAtLocation values
 
-                if track_at_location != "-":
+                if new_train_info['TrackAtLocation'] != "-":
                     train_data = {
                         'AdvertisedTime': advertised_time,
                         'EstimatedTime': estimated_time,
-                        'TrackAtLocation': track_at_location
+                        'TrackAtLocation': new_train_info['TrackAtLocation']
                     }
 
                     new_formatted_data.append(train_data)
@@ -687,7 +699,7 @@ async def update_departure() -> None:
                 <OR>
                     <AND>
                         <GT name='AdvertisedTimeAtLocation' value='$dateadd(-00:15:00)' /> 
-                        <LT name='AdvertisedTimeAtLocation' value='$dateadd(18:00:00)' />
+                        <LT name='AdvertisedTimeAtLocation' value='$dateadd(08:00:00)' />
                     </AND>
                     <GT name='EstimatedTimeAtLocation' value='$now' />
                 </OR>
@@ -743,12 +755,7 @@ async def update_departure() -> None:
 
             to_location = ["Köpenhamn" if "Dk.kh" in new_train_info.get("ToLocation", []) else "Emmaboda"]
 
-            if new_train_info.get('TrackAtLocation', '') == "1":
-                track_at_location = "0"
-            elif new_train_info.get('TrackAtLocation', '') == "2":
-                track_at_location = "1"
-            else:
-                continue  # Skip entries with other TrackAtLocation values
+            track_at_location = new_train_info.get('TrackAtLocation', '')
 
             if track_at_location != "-":
                 train_data = {
