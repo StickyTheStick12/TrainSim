@@ -121,6 +121,7 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
 
     # overwrite old data in json file
     try:
+        _logger.info("Removed old files")
         os.remove("departure.json")
         os.remove("arrival.json")
     except FileNotFoundError:
@@ -134,9 +135,13 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
     await asyncio.sleep(10)
 
     async with arrival_file_mutex:
-        with open('arrival.json', 'r') as json_file:
-            json_data = json.load(json_file)
-
+        try:
+            with open('arrival.json', 'r') as json_file:
+                json_data = json.load(json_file)
+        except FileNotFoundError:
+            _logger.error("Couldn't find arrival.json file")
+    
+    # TODO
     current_time = datetime.now()
     entries_to_remove = 0
     for entry in json_data[:2]:
@@ -145,7 +150,7 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
 
         # Check if the estimated time is less than the current time
         if estimated_time < current_time:
-            real_track_status[int(entry['TrackAtLocation'])] = "occupied"
+            real_track_status[int(entry['TrackAtLocation'])] = "Occupied"
             track_status[int(entry['TrackAtLocation'])].set()
             entries_to_remove += 1
         else:
