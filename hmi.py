@@ -528,8 +528,7 @@ async def arrival() -> None:
 
                     # await the departure of a train to be able to get a track
                     _logger.info("No track available. Waiting for a clear track")
-                    # TODO fix for 6 tracks
-                    _, pending = await asyncio.wait([track_status[0].wait(), track_status[1].wait()],
+                    _, pending = await asyncio.wait([track_status[i].wait() for i in range(6)],
                                                     return_when=asyncio.FIRST_COMPLETED)
 
                     _logger.info("Track found")
@@ -543,10 +542,10 @@ async def arrival() -> None:
                     modbus_data_queue.put(["t", track_number, "occupied"])
                 else:
                     for i in range(6):
-                        if not track_status[(i - 1) % 2].is_set():
+                        if not track_status[i].is_set():
                             # If the alternate track is available, occupy it and update track status
                             _logger.info("Original track wasn't available, chose another track instead")
-                            track_number = (i - 1) % 2 + 1
+                            track_number = i+1
                             json_data[0]['TrackAtLocation'] = str(track_number)
                             modbus_data_queue.put(["t", track_number, "occupied"])
                             modbus_data_queue.put(["s", 1, str(track_number), first_entry['AdvertisedTime']])
