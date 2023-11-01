@@ -12,7 +12,7 @@ import multiprocessing
 
 logging.basicConfig()
 _logger = logging.getLogger(__file__)
-_logger.setLevel("WARNING")
+_logger.setLevel("INFO")
 
 # Modbus variables
 datastore_size = 110  # needs to be the same size as the server, max 125 though
@@ -206,7 +206,7 @@ def modbus_client_thread() -> None:
 
                         # verify signature
                         sha256 = hashlib.sha256()
-                        calc_signature = "".join(data) + secret_key.decode("utf-8") + str(data_recevied)
+                        calc_signature = " ".join(str(value) for value in data) + secret_key.decode("utf-8") + str(data_recevied)
                         sha256.update(calc_signature.encode("utf-8"))
                         calc_signature = sha256.hexdigest()
 
