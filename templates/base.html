@@ -19,10 +19,104 @@
           width: 6%;
           height: auto;
         }
-      </style>
-    {% block content %}{% endblock %}
+        #navbar {
+          width: 400px;
+          margin: 30px auto;
+          font-size: 13px;
+          padding: 15px 10px;
+          border-radius: 50px;
+          background-color: rgb(80, 78, 78);
+        }
+        #navbar a, a:visited {
+          text-decoration: none;
+          cursor: pointer;
+          color: #fff;
+          font-weight: bold;
+          letter-spacing: 1.3px;
+          padding: 7px;
+          border-radius: 20px;
+          transition: background-color 0.2s ease-in-out;
 
-  </div>
+        }
+
+        #navbar a:hover {
+          background-color: #5CBC3A;
+          overflow: hidden;
+          border-radius: 20px;
+          padding:7px;
+
+        }
+
+        #navbar ul {
+          list-style-type: none;
+          margin: 0;
+          padding: 0;
+          text-align: center;
+
+        }
+        #navbar li {
+          display: inline; 
+          margin: 0 20px;
+
+        }
+        .active {
+          background:#dfe0e5;
+          overflow:hidden;
+          border-radius: 20px;
+          background-color: #2596be;
+          padding:6px;
+        }
+        .logout-button {
+            position: absolute;
+            top: 20px;
+            right: 10px;
+
+            width: 51.2px;
+            height: 51.2px;
+        }
+
+        .logout-img {
+            width: 100%;
+            height: auto;
+
+        }
+
+        .logout-img:hover {
+            transform: scale(1.1);
+        }        
+
+      </style>
+
+      <script>
+          document.addEventListener("DOMContentLoaded", function () {
+            var links = document.querySelectorAll(".nav-link");
+            var currentPath = window.location.pathname;
+
+            for (var i = 0; i < links.length; i++) {
+              var link = links[i];
+              if (link.getAttribute("href") === currentPath) {
+                link.classList.add("active");
+              }
+            }
+          });
+      </script>
+
+      {% if not loginPage %}
+      <a href="{{ url_for('logOutUser') }}" class="logout-button">
+        <img class="logout-img" src="{{ url_for('static', filename='img/logout.png')}}" alt="logga ut bild">
+      </a>
+      <nav id="navbar">
+        <ul>
+          <li><a href="/timetable" class="nav-link">Timetable</a></li>
+          <li><a href="/railway" class="nav-link">Railway Status</a></li>
+          <li><a href="/logs" class="nav-link">Logs</a></li>
+        </ul>
+      </nav>
+      {% endif %}
+
+
+
+    {% block content %}{% endblock %}
 
 
     <script>
@@ -37,6 +131,4 @@
     </script>
     
   </body>
-
-  </div>
 </html>
