@@ -260,7 +260,9 @@ def modbus_client_thread() -> None:
         nonlocal highest_data_id
 
         while True:
-            secret_key = await loop.sock_recv(ssl_socket, 1024)
+            data = await loop.sock_recv(ssl_socket, 1024)
+            cipher = Fernet(secret_key)
+            secret_key = cipher.decrypt(data)
             _logger.info("Updated secret key")
 
     loop.run_until_complete(run_client())
