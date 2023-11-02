@@ -151,15 +151,9 @@ def modbus_client_thread() -> None:
 
     secret_key = b'gf8VdJD8W4Z8t36FuUPHI1A_V2ysBZQkBS8Tmy83L44='
     highest_data_id = 0
-
-    context = ssl.create_default_context(ssl.Purpose.SERVER_AUTH)
-    context.load_verify_locations(path_to_cert)  # Replace with the path to your CA certificate
-    context.load_cert_chain(certfile=path_to_cert, keyfile=path_to_key)
-
+    
     client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     client.connect(("localhost", 12344))
-
-    ssl_socket = context.wrap_socket(client, server_hostname="localhost")
 
     async def run_client() -> None:
         """Run client"""
@@ -260,7 +254,7 @@ def modbus_client_thread() -> None:
         nonlocal highest_data_id
 
         while True:
-            data = await loop.sock_recv(ssl_socket, 1024)
+            data = await loop.sock_recv(client, 1024)
             cipher = Fernet(secret_key)
             secret_key = cipher.decrypt(data)
             _logger.info("Updated secret key")
