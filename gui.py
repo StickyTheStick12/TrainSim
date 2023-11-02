@@ -152,10 +152,14 @@ def modbus_client_thread() -> None:
     secret_key = b'gf8VdJD8W4Z8t36FuUPHI1A_V2ysBZQkBS8Tmy83L44='
     highest_data_id = 0
 
-    client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    client.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    context = ssl.create_default_context(ssl.Purpose.SERVER_AUTH)
+    context.load_verify_locations(path_to_cert)  # Replace with the path to your CA certificate
+    context.load_cert_chain(certfile=path_to_cert, keyfile=path_to_key)
 
-    client = ssl.wrap_socket(client, keyfile=path_to_key, certfile=path_to_cert)
+    client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    client.connect(("localhost", 12344))
+
+    ssl_socket = context.wrap_socket(client, server_hostname="localhost")
 
     async def run_client() -> None:
         """Run client"""
@@ -256,7 +260,7 @@ def modbus_client_thread() -> None:
         nonlocal highest_data_id
 
         while True:
-            secret_key = await loop.sock_recv(client, 1024)
+            secret_key = await loop.sock_recv(ssl_socket, 1024)
             _logger.info("Updated secret key")
 
     loop.run_until_complete(run_client())
