@@ -313,6 +313,24 @@ def logData(json_data, action, information):
     return json_data
 
 
+def sortTimeTable(train_list):
+    """Functions takes in a trainList with Dict in it"""
+    now = datetime.now()
+    cur_time = now.strftime("%H:%M")
+    temp_train_list = sorted(train_list, key=lambda x: (x['time'] >= cur_time, x['time']))
+    train_list = temp_train_list.copy()
+    for train in train_list:
+        if train['time'] > cur_time:
+            break
+        else:
+            temp_train_list.append(train)
+            temp_train_list.pop(0)
+
+    train_list = temp_train_list
+
+    return train_list
+
+
 async def modbus_server_thread(context: ModbusServerContext) -> None:
     """Creates the server that will listen at localhost"""
 
@@ -368,13 +386,15 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
     sequence_number = 0
     secret_key = b'gf8VdJD8W4Z8t36FuUPHI1A_V2ysBZQkBS8Tmy83L44='
 
-    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+    context.load_cert_chain(certfile=cert, keyfile=key)
 
-    server = ssl.wrap_socket(server, server_side=True, keyfile=key, certfile=cert)
-    server.bind(("localhost", 12346))
-    server.listen(0)
-    connection, client_address = server.accept()
+    server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server_socket.bind(("localhost", 12346))
+    server_socket.listen(1)
+
+    ssl_socket, client_address = context.wrap_socket(server_socket, server_side=True)
+    connection, client_address = ssl_socket.accept()
 
     # overwrite old data in json file
     try:
