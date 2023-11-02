@@ -1,7 +1,11 @@
 # TODO: data should be available in hmi. Either create a copy of the json or change data here
 
-# TODO: fix so a late arrival will update the departure
-# TODO: fix so when a train asks for the switch it will calculate and update all the trains?
+# TODO: fix so we ask for the switch later, and keep the switch 1 minute after we depart/arrive
+from flask import Flask, render_template, request, redirect, url_for, session, flash
+from flask_login import login_user, logout_user, login_required, current_user, LoginManager, UserMixin
+import bcrypt
+
+import modules as SQL
 
 import bisect
 import json
@@ -13,6 +17,8 @@ import requests
 import hashlib
 import secrets
 import os
+import socket
+import ssl
 
 from pymodbus import __version__ as pymodbus_version
 from pymodbus.datastore import (
@@ -63,6 +69,252 @@ real_track_status = ["A"] * 6  # this is the actual representation if a track is
 switch_status = 1  # 0 - 6
 
 modbus_data_queue = multiprocessing.Queue()
+
+app = Flask(__name__)
+app.logger.setLevel(logging.ERROR)
+
+# Sessions för login
+app.secret_key = b'_5#y2L"F4Q8z\n\xec]/'
+
+login_manager = LoginManager()
+login_manager.init_app(app)
+
+mutex = multiprocessing.Lock()
+
+
+class Users(UserMixin):
+    def __init__(self, username, password, is_active=True):
+        self.id = 1
+        self.username = username
+        self.password = password
+        self.is_active = is_active
+
+    def get_id(self):
+        return self.id
+
+    def is_active(self, value):
+        self.is_active = value
+        return
+
+
+@login_manager.user_loader
+def loader_user(user_id):
+    # Här måste vi löser ett säkrare sätt
+    authenticate = SQL.checkAuthentication()
+
+    user = Users(authenticate[0], authenticate[1])
+    return user
+
+
+@app.route('/', methods=["POST", "GET"])
+def loginPage(invalid=False):
+    if request.method == "POST":
+        authenticate = SQL.checkAuthentication()
+
+        # Här får vi data från loginet. Gör backend saker som kontroller etc
+        user_credentials = {'username': request.form["username"], 'password': request.form["pwd"]}
+        user = Users(user_credentials['username'], user_credentials['password'])
+
+        if user.username == authenticate[0] and bcrypt.checkpw(user.password.encode(), authenticate[1].encode()):
+            login_user(user)
+            session['username'] = user.username
+            json_data = open_json("data.json")
+            json_data = logData(json_data, "User login", session['username'])
+            writeToJson('data.json', json_data)
+            return redirect(url_for('timetablePage'))
+        else:
+            invalid = True
+            return render_template("login.html", invalid=invalid, loginPage=True)
+
+    return render_template("login.html", invalid=invalid, loginPage=True)
+
+
+@app.route('/timetable', methods=["POST", "GET"])
+@login_required
+def timetablePage(change=None):
+    json_data = open_json("data.json")
+
+    if request.method == "GET":
+        json_data['trains'] = sortTimeTable(json_data['trains'])
+        writeToJson('data.json', json_data)
+
+    if request.method == "POST":
+        button_clicked = request.form.get("button", False)
+
+        if button_clicked:
+            match button_clicked:
+                case "addTimeForm":
+                    change = "addTimeForm"
+
+                case "deleteTimeForm":
+                    change = "deleteTimeForm"
+
+                case "addNewTime":
+                    train_data = {
+                        'trainNumber': request.form.get('trainNumber', False),
+                        'time': request.form.get('departure', False),
+                        'track': request.form.get('tracktype', False)}
+
+                    json_data['trains'].append(train_data)
+                    json_data = logData(json_data, "New entry in timetable",
+                                        f"Train {train_data['trainNumber']} was added")
+
+                    data = ["h", train_data["time"], train_data["time"], train_data['trainNumber'], train_data['track']]
+                    modbus_data_queue.put(data)
+
+                case "deleteTime":
+                    id = int(request.form.get('id', False))
+                    if id <= len(json_data['trains']):
+                        json_data = logData(json_data, "Deleted entry in timetable",
+                                            f"Train {json_data['trains'][id - 1]['trainNumber']} was deleted")
+                        json_data['trains'].pop(id - 1)
+                        data = ["R"] + [id - 1]
+                        modbus_data_queue.put(data)
+
+        writeToJson('data.json', json_data)
+    return render_template("timetable.html", change=change, trainList=json_data['trains'])
+
+
+@app.route('/logout')
+@login_required
+def logOutUser():
+    logout_user()
+    json_data = open_json("data.json")
+    json_data = logData(json_data, "User logout", session['username'])
+    print(json_data)
+    writeToJson("data.json", json_data)
+    return redirect(url_for("loginPage"))
+
+
+@app.route('/railway', methods=["POST", "GET"])
+@login_required
+def railwayPage():
+    json_data = open_json("data.json")
+
+    track_status = json_data['trackStatus']
+    current_trackStatus = json_data['currentTrackStatus']
+
+    if request.method == "POST":
+        button_clicked = request.form.get("button", False)
+        if button_clicked:
+            match button_clicked:
+
+                case "track1":
+                    if current_trackStatus['1'] == track_status[0]:
+                        json_data['currentTrackStatus']['1'] = track_status[1]
+                        logData(json_data, "Track status changed", "Track 1 changed from Available to Occupied")
+                    else:
+                        json_data['currentTrackStatus']['1'] = track_status[0]
+                        logData(json_data, "Track status changed", "Track 1 changed from Occupied to Available")
+
+                    data = ["T", 1, json_data['currentTrackStatus']['1']]
+                    modbus_data_queue.put(data)
+
+                case "track2":
+                    if current_trackStatus['2'] == track_status[0]:
+                        json_data['currentTrackStatus']['2'] = track_status[1]
+                        logData(json_data, "Track status changed", "Track 2 changed from available to Occupied")
+                    else:
+                        json_data['currentTrackStatus']['2'] = track_status[0]
+                        logData(json_data, "Track status changed", "Track 2 changed from Occupied to Available")
+
+                    data = ["T", 2, json_data['currentTrackStatus']['2']]
+                    modbus_data_queue.put(data)
+
+                case "track3":
+                    if current_trackStatus['3'] == track_status[0]:
+                        json_data['currentTrackStatus']['3'] = track_status[1]
+                        logData(json_data, "Track status changed", "Track 3 changed from available to Occupied")
+                    else:
+                        json_data['currentTrackStatus']['3'] = track_status[0]
+                        logData(json_data, "Track status changed", "Track 3 changed from Occupied to Available")
+
+                    data = ["T", 2, json_data['currentTrackStatus']['3']]
+                    modbus_data_queue.put(data)
+
+                case "track4":
+                    if current_trackStatus['4'] == track_status[0]:
+                        json_data['currentTrackStatus']['4'] = track_status[1]
+                        logData(json_data, "Track status changed", "Track 4 changed from available to Occupied")
+                    else:
+                        json_data['currentTrackStatus']['4'] = track_status[0]
+                        logData(json_data, "Track status changed", "Track 4 changed from Occupied to Available")
+
+                    data = ["T", 2, json_data['currentTrackStatus']['4']]
+                    modbus_data_queue.put(data)
+
+                case "track5":
+                    if current_trackStatus['5'] == track_status[0]:
+                        json_data['currentTrackStatus']['5'] = track_status[1]
+                        logData(json_data, "Track status changed", "Track 5 changed from available to Occupied")
+                    else:
+                        json_data['currentTrackStatus']['5'] = track_status[0]
+                        logData(json_data, "Track status changed", "Track 5 changed from Occupied to Available")
+
+                    data = ["T", 2, json_data['currentTrackStatus']['5']]
+                    modbus_data_queue.put(data)
+
+                case "track6":
+                    if current_trackStatus['6'] == track_status[0]:
+                        json_data['currentTrackStatus']['6'] = track_status[1]
+                        logData(json_data, "Track status changed", "Track 6 changed from available to Occupied")
+                    else:
+                        json_data['currentTrackStatus']['6'] = track_status[0]
+                        logData(json_data, "Track status changed", "Track 6 changed from Occupied to Available")
+
+                    data = ["T", 2, json_data['currentTrackStatus']['6']]
+                    modbus_data_queue.put(data)
+
+        else:
+            button_clicked = request.form.get('switchconnection', False)
+
+            if button_clicked:
+                tempSwitchData = json_data['switchStatus']
+                json_data['switchStatus'] = "Track " + button_clicked
+                json_data = logData(json_data, "Changed Switch Connection",
+                                    f"Switch connection changed from {tempSwitchData} to {json_data['switchStatus']}")
+                data = ["S", button_clicked]
+                modbus_data_queue.put(data)
+
+        writeToJson('data.json', json_data)
+
+    return render_template("railway.html", trackStatus=track_status, current_trackStatus=current_trackStatus,
+                           switchStatus=json_data['switchStatus'])
+
+
+@app.route('/logs')
+@login_required
+def logPage():
+    json_data = open_json("data.json")
+
+    return render_template("logs.html", logData=json_data['logs'])
+
+
+def open_json(json_file):
+    with open(json_file, 'r') as dataFile:
+        json_data = json.load(dataFile)
+    return json_data
+
+
+def writeToJson(json_file, data_json):
+    data_json = json.dumps(data_json, indent=3)
+    with mutex, open(json_file, 'w') as dataFile:
+        dataFile.write(data_json)
+
+
+def logData(json_data, action, information):
+    '''Någon form utav erorr hantering'''
+    try:
+        currentDateTime = datetime.now()
+        currentDateTime = currentDateTime.strftime('%Y-%m-%d || %H:%M:%S')
+        logInformation = f"[{currentDateTime}] Done by User: {session['username']}, Action: {action}, Information: {information}"
+
+        json_data['logs'].append(logInformation)
+    except:
+        print("ERROR : List Index out of range")
+
+    return json_data
+
 
 async def modbus_server_thread(context: ModbusServerContext) -> None:
     """Creates the server that will listen at localhost"""
@@ -117,7 +369,15 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
     slave_id = 0x00  # we broadcast the data to all the connected slaves
     address = 0x00  # the address to where we want to write in the holding register
     sequence_number = 0
-    secret_key = b"b$0!9Lp^z2QsE1Yf"
+    secret_key = b'gf8VdJD8W4Z8t36FuUPHI1A_V2ysBZQkBS8Tmy83L44='
+
+    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+
+    server = ssl.wrap_socket(server, server_side=True, keyfile=key, certfile=cert)
+    server.bind(("localhost", 12346))
+    server.listen(0)
+    connection, client_address = server.accept()
 
     # overwrite old data in json file
     try:
@@ -168,6 +428,8 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
     loop.create_task(arrival())
     loop.create_task(departure())
     loop.create_task(acquire_switch(switch_queue))
+
+    await update_keys(secret_key)
 
     # wait until client has connected
     while context[slave_id].getValues(func_code, datastore_size - 2, 1) == [0]:
@@ -258,9 +520,14 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                         async with departure_file_mutex:
                             with open('departure.json', 'r+') as json_file:
                                 json_data = json.load(json_file)
-                                json_data[0]["EstimatedTime"] = (
-                                        datetime.strptime(json_data[0]["EstimatedTime"], "%Y-%m-%d %H:%M") + timedelta(
+                                json_data[0]["EstimatedTime"] = (datetime.strptime(json_data[0]["EstimatedTime"],
+                                                                                   "%Y-%m-%d %H:%M") + timedelta(
                                     minutes=update_time)).strftime("%Y-%m-%d %H:%M")
+                                index = 1
+                                while (json_data[index]["EsitmatedTime"] == json_data[index - 1]["EstimatedTime"]):
+                                    json_data[1]["EstimatedTime"] = (datetime.strptime(json_data[0]["EstimatedTime"],
+                                                                                       "%Y-%m-%d %H:%M") + timedelta(
+                                        minutes=update_time)).strftime("%Y-%m-%d %H:%M")
                                 json_file.seek(0)
                                 json.dump(json_data, json_file, indent=2)
 
@@ -347,17 +614,12 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
 
                 if insert_index == 0:
                     wake_arrival.set()
+            case "K":
+                secret_key = data[1]
+                connection.sendall(data[2])
             case _:
-                if data[0] == "K":
-                    temp = secret_key
-                    secret_key = data[1]
-
-                    data = "K " + " ".join(str(value.decode("utf-8")) for value in data[2:])
-                    signature = data + temp.decode("utf-8")
-                    sequence_number = 0
-                else:
-                    data = " ".join(str(value) for value in data)
-                    signature = data + secret_key.decode("utf-8")
+                data = " ".join(str(value) for value in data)
+                signature = data + secret_key.decode("utf-8")
 
                 client_verified = False
 
@@ -579,8 +841,6 @@ async def arrival() -> None:
                                                     return_when=asyncio.FIRST_COMPLETED)
 
                     _logger.info("A track is available")
-                    for event in pending:
-                        event.clear()
 
                 if not track_status[track_number - 1].is_set():
                     # If the track is available, occupy it and update track status
@@ -781,9 +1041,9 @@ async def update_departure() -> None:
                        if not any(existing_train['AdvertisedTime'] == new_train['AdvertisedTime']
                                   for existing_train in existing_data) and new_train['TrackAtLocation'] != "-"]
 
-        for new_train in new_entries:
-            modbus_data_queue.put(["A", new_train['AdvertisedTime'], new_train['EstimatedTime'],
-                                   new_train['ToLocation'], int(new_train['TrackAtLocation'])])
+        #for new_train in new_entries:
+            #modbus_data_queue.put(["A", new_train['AdvertisedTime'], new_train['EstimatedTime'],
+             #                      new_train['ToLocation'], int(new_train['TrackAtLocation'])])
 
         # Combine existing data and new entries
         updated_data = existing_data + new_entries
