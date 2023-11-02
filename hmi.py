@@ -1,4 +1,7 @@
-# TODO: data should be available in hmi
+# TODO: data should be available in hmi. Either create a copy of the json or change data here
+
+# TODO: fix so a late arrival will update the departure
+# TODO: fix so when a train asks for the switch it will calculate and update all the trains?
 
 import bisect
 import json
@@ -27,7 +30,7 @@ logging.basicConfig(format='%(asctime)s - %(levelname)s - %(funcName)s - %(messa
 _logger = logging.getLogger(__file__)
 
 # Modbus variables
-datastore_size = 110  # cant be bigger than 125
+datastore_size = 124  # cant be bigger than 125
 modbus_port = 12345
 
 cert = r"cert.pem"
@@ -41,6 +44,7 @@ departure_file_mutex = asyncio.Lock()
 last_acquired_switch = datetime.now() - timedelta(minutes=5)
 departure_event = asyncio.Event()
 arrival_event = asyncio.Event()
+train_id_update_event = asyncio.Event()
 
 wake_arrival = asyncio.Event()
 wake_departure = asyncio.Event()
@@ -59,7 +63,6 @@ real_track_status = ["A"] * 6  # this is the actual representation if a track is
 switch_status = 1  # 0 - 6
 
 modbus_data_queue = multiprocessing.Queue()
-
 
 async def modbus_server_thread(context: ModbusServerContext) -> None:
     """Creates the server that will listen at localhost"""
@@ -113,9 +116,7 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
     func_code = 3  # function code for modbus that we want to read and write data from holding register
     slave_id = 0x00  # we broadcast the data to all the connected slaves
     address = 0x00  # the address to where we want to write in the holding register
-    prior_data = ""
-    prior_signature = ""
-    data_sent = 0
+    sequence_number = 0
     secret_key = b"b$0!9Lp^z2QsE1Yf"
 
     # overwrite old data in json file
@@ -129,6 +130,7 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
     # we then start the tasks and this process continues with the above things
     loop.create_task(update_departure())
     loop.create_task(update_arrival())
+    loop.create_task(train_match())
 
     # wait so we have time to update the json files
     await asyncio.sleep(2)
@@ -140,27 +142,28 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
         except FileNotFoundError:
             _logger.error("Couldn't find arrival.json file")
 
-    # TODO debug
-    current_time = datetime.now()
-    entries_to_remove = 0
-    for entry in json_data[:2]:
-        # Parse the estimated time from the entry
-        estimated_time = datetime.strptime(entry["EstimatedTime"], "%Y-%m-%d %H:%M")
-
-        # Check if the estimated time is less than the current time
-        if estimated_time < current_time:
-            real_track_status[int(entry['TrackAtLocation'])] = "O"
-            track_status[int(entry['TrackAtLocation'])].set()
-            entries_to_remove += 1
-        else:
-            break
-
-    for i in range(entries_to_remove):
-        json_data.pop(0)
-
+    async with departure_file_mutex:
+        with open('departure.json','r') as departures:
+            departure_data = json.load(departures)
     async with arrival_file_mutex:
-        with open('arrival.json', 'w') as json_file:
-            json.dump(json_data, json_file, indent=2)
+        with open('arrival.json','r') as arrivals:
+            arrival_data = json.load(arrivals)
+        success = False
+        # finds if trains have id numbers
+        for dtrain in departure_data:
+            if(len(dtrain) == 5):
+                for atrain in arrival_data:
+                    if(len(atrain) == 4):
+                        #compares id numbers
+                        if(dtrain['id'] == atrain['id']):
+                            success = True
+                            break
+
+            if success == False:
+                track_status[int(dtrain['TrackAtLocation'])-1].set()
+                real_track_status[int(dtrain['TrackAtLocation'])-1] = "O"
+            else:
+                success = False
 
     loop.create_task(arrival())
     loop.create_task(departure())
@@ -214,7 +217,6 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
 
         # h: inserts a new time in the json files
         # Packet ["h", "AdvertisedTimeArrival", "AdvertisedTimeDeparture", "ToLocation", Track]
-
 
         match data[0]:
             case "a":
@@ -313,7 +315,7 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                         json_file.seek(0)
                         json.dump(json_data, json_file, indent=2)
             case "h":
-                train_data = {'AdvertisedTime': data[1], 'EstimatedTime': data[2], 'ToLocation': data[3],
+                train_data = {'AdvertisedTime': data[2], 'EstimatedTime': data[2], 'ToLocation': data[3],
                               'TrackAtLocation': data[4]}
                 async with departure_file_mutex:
                     with open('departure.json', 'r') as departures:
@@ -329,9 +331,9 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                 if insert_index == 0:
                     wake_departure.set()
 
-                modbus_data_queue.put([data[1], data[1], data[3], data[4]])
+                modbus_data_queue.put(["A", data[1], data[3], data[4]])
 
-                train_data = {'AdvertisedTime': data[1], 'EstimatedTime': data[2], 'TrackAtLocation': data[3]}
+                train_data = {'AdvertisedTime': data[1], 'EstimatedTime': data[1], 'TrackAtLocation': data[4]}
 
                 async with arrival_file_mutex:
                     with open('arrival.json', 'r') as arrivals:
@@ -346,61 +348,57 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                 if insert_index == 0:
                     wake_arrival.set()
             case _:
-                data_sent += 1
-
-                # holding register should now contain [amount to read, [Packet], nonce, signature]
-                sha256 = hashlib.sha256()
-
                 if data[0] == "K":
                     temp = secret_key
                     secret_key = data[1]
 
                     data = "K " + " ".join(str(value.decode("utf-8")) for value in data[2:])
                     signature = data + temp.decode("utf-8")
+                    sequence_number = 0
                 else:
                     data = " ".join(str(value) for value in data)
-                    signature = data + secret_key.decode("utf-8") + str(data_sent)
+                    signature = data + secret_key.decode("utf-8")
 
-                sha256.update(signature.encode("utf-8"))
-                signature = sha256.hexdigest()
-                nonce = [char for char in secrets.token_bytes(2) if char != 32]
+                client_verified = False
 
-                data = [len(data)] + [ord(char) for char in data] + [32] + nonce + [32] + [ord(char) for char in signature]
-                _logger.info(f"Writing data: {data}")
-                sha256 = hashlib.sha256()
-                expected_signature = bytes(nonce) + secret_key
-                sha256.update(expected_signature)
-                expected_signature = sha256.hexdigest()
+                while not client_verified:
+                    sequence_number += 1
+                    sha256 = hashlib.sha256()
+                    temp_signature = signature + str(sequence_number)
+                    _logger.debug(temp_signature)
+                    sha256.update(temp_signature.encode("utf-8"))
+                    temp_signature = sha256.hexdigest()
+                    nonce = [char for char in secrets.token_bytes(2)]
 
-                if prior_data:
-                    # continue sending old data until the client writes the correct signature
-                    while True:
-                        # wait until the client has read the data
-                        while context[slave_id].getValues(func_code, datastore_size - 2, 1) == [0]:
-                            _logger.debug("Waiting for client to copy datastore; sleeping 2 second")
-                            await asyncio.sleep(2)  # give the server control so it can answer the client
+                    if sequence_number == 100:
+                        _logger.info("Updating secret key")
+                        await update_keys(secret_key)
 
-                        if context[slave_id].getValues(func_code, 0, 64) == [prior_signature]:
-                            break
+                    data_to_send = [sequence_number] + [len(data)] + [ord(char) for char in data] + [32] + nonce + [32] + [ord(char) for char in temp_signature]
 
-                        _logger.warning("Wrong signature tried to validate data in the holding register")
-                        context[slave_id].setValues(func_code, address, prior_data)
-                        _logger.info("Resetting flag")
-                        context[slave_id].setValues(func_code, datastore_size - 2, [0])
+                    sha256 = hashlib.sha256()
 
-                _logger.debug("Client has read data from datastore, writing new data")
-                context[slave_id].setValues(func_code, address, data)
+                    _logger.debug("Sending data")
+                    context[slave_id].setValues(func_code, address, data_to_send)
 
-                _logger.info("Resetting flag")
-                context[slave_id].setValues(func_code, datastore_size - 2, [0])
+                    _logger.debug("Resetting flag")
+                    context[slave_id].setValues(func_code, datastore_size - 2, [0])
 
-                prior_data = data
-                prior_signature = expected_signature
+                    expected_signature = str(nonce) + secret_key.decode("utf-8")
+                    _logger.debug(f"nonce {str(nonce)}")
+                    sha256.update(expected_signature.encode("utf-8"))
+                    expected_signature = [ord(char) for char in sha256.hexdigest()]
+                    _logger.debug(f"Expecting: {expected_signature}")
 
-                if data_sent == 100:
-                    _logger.info("Updating secret key")
-                    await update_keys(secret_key)
-                    data_sent = 0
+                    while context[slave_id].getValues(func_code, datastore_size - 2, 1) == [0]:
+                        _logger.info("Waiting for client to copy datastore; sleeping 2 second")
+                        await asyncio.sleep(2)  # give the server control so it can answer the client
+
+                    if context[slave_id].getValues(func_code, 0, 64) == expected_signature:
+                        _logger.info("Client is verified")
+                        client_verified = True
+                    else:
+                        _logger.critical("Found wrong signature in holding register")
 
 
 def modbus_helper() -> None:
@@ -745,6 +743,8 @@ async def update_arrival() -> None:
     else:
         _logger.error("API response was None")
 
+    train_id_update_event.set()
+
     _logger.info(f"Sleeping 15 minutes. Next update {datetime.now() + timedelta(minutes=15):%H:%M}")
     await asyncio.sleep(15 * 60)
 
@@ -783,7 +783,7 @@ async def update_departure() -> None:
 
         for new_train in new_entries:
             modbus_data_queue.put(["A", new_train['AdvertisedTime'], new_train['EstimatedTime'],
-                                   new_train['ToLocation'], int(new_train['Track'])])
+                                   new_train['ToLocation'], int(new_train['TrackAtLocation'])])
 
         # Combine existing data and new entries
         updated_data = existing_data + new_entries
@@ -850,6 +850,59 @@ async def update_keys(secret_key: bytes) -> None:
     encrypted_message = cipher.encrypt(new_key)
 
     modbus_data_queue.put(["K", new_key, encrypted_message])
+
+
+async def train_match() -> None:
+    """compares arrivals against departures and gives train ids based on the arrival.json list"""
+    while True:
+        await train_id_update_event.wait()
+        train_id_update_event.clear()
+
+        timeformat = '%Y:%m:%d:%H:%M'
+        with open('departure.json', 'r') as departures:
+            departure_data = json.load(departures)
+        with open('arrival.json', 'r') as arrivals:
+            arrival_data = json.load(arrivals)
+        idcounter = 1
+
+        # creates one bestmatch which contains the departure train that needs to be updated
+        bestmatch = departure_data[0]
+        timedelta0 = timedelta(hours=0)
+        for atrain in arrival_data:
+
+            # if the train doesnt have an id
+            if (len(atrain) == 3):
+
+                # makes the atrain advertised time into a comparable format
+                formatted_str = atrain['AdvertisedTime'].replace('-', ' ').replace(' ', ':')
+                atraintime = datetime.strptime(formatted_str, timeformat)
+                for dtrain in departure_data:
+
+                    # if the dtrain is on the same track as the atrain and it doesnt have an id
+                    if (dtrain['TrackAtLocation'] == atrain['TrackAtLocation'] and len(dtrain) == 4):
+
+                        # makes the dtrain advertised time into a comparable format
+                        formatted_str = dtrain['AdvertisedTime'].replace('-', ' ').replace(' ', ':')
+                        dtraintime = datetime.strptime(formatted_str, timeformat)
+
+                        # compares the traintimes
+                        comparetime = dtraintime - atraintime
+
+                        # if the compared train times are positive
+                        if comparetime > timedelta0:
+                            bestmatch = dtrain
+                            break
+
+            # give atrain and bestmatch the same id then increase id
+            atrain['id'] = str(idcounter)
+            bestmatch['id'] = str(idcounter)
+            idcounter += 1
+
+        with open('departure.json', 'w') as departures:
+            json.dump(departure_data, departures, indent=4)
+
+        with open('arrival.json', 'w') as arrivals:
+            json.dump(arrival_data, arrivals, indent=4)
 
 
 if __name__ == '__main__':
