@@ -614,6 +614,7 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
             case "K":
                 secret_key = data[1]
                 connection.sendall(data[2])
+                _logger.info("sent new secret key")
             case _:
                 data = " ".join(str(value) for value in data)
                 signature = data + secret_key.decode("utf-8")
