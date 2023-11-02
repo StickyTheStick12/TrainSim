@@ -9,6 +9,8 @@ from pymodbus.exceptions import ModbusException
 import asyncio
 import logging
 import multiprocessing
+import ssl
+import socket
 
 logging.basicConfig()
 _logger = logging.getLogger(__file__)
@@ -145,8 +147,15 @@ class TrainStation(ctk.CTk):
 def modbus_client_thread() -> None:
     """This thread will start the modbus client and connect to the server"""
     client = None
-
     loop = asyncio.new_event_loop()
+
+    secret_key = b'gf8VdJD8W4Z8t36FuUPHI1A_V2ysBZQkBS8Tmy83L44='
+    highest_data_id = 0
+
+    client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    client.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+
+    client = ssl.wrap_socket(client, keyfile=path_to_key, certfile=path_to_cert)
 
     async def run_client() -> None:
         """Run client"""
@@ -178,8 +187,8 @@ def modbus_client_thread() -> None:
     async def read_holding_register() -> None:
         """Reads data from holding register"""
         nonlocal client
-        secret_key = b"b$0!9Lp^z2QsE1Yf"
-        highest_data_id = 0
+        nonlocal secret_key
+        nonlocal highest_data_id
 
         try:
             while True:
@@ -201,9 +210,6 @@ def modbus_client_thread() -> None:
                         signature = received_data[1+amount_to_read+3:]
 
                         data = received_data[:amount_to_read].split(" ")
-
-                        if received_data[0] == "K":
-                            highest_data_id = 0
 
                         if not data_id > highest_data_id:
                             continue
@@ -233,18 +239,9 @@ def modbus_client_thread() -> None:
 
                             _logger.info(f"received {data}")
 
-                            # update secret_key
-                            func_code = data[1]
-
-                            if func_code == "K":
-                                cipher = Fernet(secret_key)
-                                secret_key = cipher.decrypt(data)
-                                _logger.info("Updated key")
-                                data_recevied = 0
-                            else:
-                                _logger.info("Verified signature on data, notified gui.")
-                                # put data in queue for the GUI thread
-                                modbus_data_queue.put(data[:-3])
+                            _logger.info("Verified signature on data, notified gui.")
+                            # put data in queue for the GUI thread
+                            modbus_data_queue.put(data)
                     else:
                         _logger.error("Error reading holding register")
 
@@ -254,7 +251,16 @@ def modbus_client_thread() -> None:
             _logger.error(f"Received ModbusException({exc}) from library")
             client.close()
 
+    async def receive_key() -> None:
+        nonlocal secret_key
+        nonlocal highest_data_id
+
+        while True:
+            secret_key = await loop.sock_recv(client, 1024)
+            _logger.info("Updated secret key")
+
     loop.run_until_complete(run_client())
+    loop.create_task(receive_key())
     loop.run_until_complete(read_holding_register())
 
 
