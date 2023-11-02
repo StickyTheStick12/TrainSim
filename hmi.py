@@ -1,6 +1,3 @@
-# TODO: data should be available in hmi. Either create a copy of the json or change data here
-
-# TODO: fix so we ask for the switch later, and keep the switch 1 minute after we depart/arrive
 from flask import Flask, render_template, request, redirect, url_for, session, flash
 from flask_login import login_user, logout_user, login_required, current_user, LoginManager, UserMixin
 import bcrypt
@@ -96,7 +93,7 @@ class Users(UserMixin):
         self.is_active = value
         return
 
-
+withc
 @login_manager.user_loader
 def loader_user(user_id):
     # Här måste vi löser ett säkrare sätt
@@ -514,7 +511,7 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                     await switch_queue.put(data[1:])
 
                     difference = max((last_acquired_switch - datetime.now()).total_seconds(), 0)
-                    update_time = (5 * switch_queue.qsize() + difference) // 60  # Convert to minutes
+                    update_time = (3 * switch_queue.qsize() + difference) // 60  # Convert to minutes
 
                     if data[1] == 0:
                         async with departure_file_mutex:
@@ -696,12 +693,12 @@ async def departure() -> None:
             first_entry = json_data[0]
             estimated_time = datetime.strptime(first_entry['EstimatedTime'], "%Y-%m-%d %H:%M")
 
-            # Calculate the time difference until the estimated departure time and sleep until 5 minutes before arrival
+            # Calculate the time difference until the estimated departure time and sleep until 3 minutes before arrival
             difference = estimated_time - datetime.now()
 
-            # Use asyncio.wait with tasks
             try:
-                await asyncio.wait_for(wake_departure.wait(), timeout=max(0, difference.total_seconds() - 5 * 60))
+                # sleep until 3 minutes before departure or if another train departs before this
+                await asyncio.wait_for(wake_departure.wait(), timeout=max(0, difference.total_seconds() - 2 * 60))
                 wake_departure.clear()
                 continue
             except asyncio.TimeoutError:
@@ -807,7 +804,7 @@ async def arrival() -> None:
             difference = estimated_time - datetime.now()
 
             try:
-                await asyncio.wait_for(wake_arrival.wait(), timeout=max(0, difference.total_seconds() - 5 * 60))
+                await asyncio.wait_for(wake_arrival.wait(), timeout=max(0, difference.total_seconds() - 2 * 60))
                 wake_arrival.clear()
                 continue
             except asyncio.TimeoutError:
@@ -903,19 +900,22 @@ async def acquire_switch(switch_queue: asyncio.Queue) -> None:
         data = await switch_queue.get()
 
         # Arrival and departure don't have precedence over each other, so if anyone has acquired the switch, wait
-        difference = last_acquired_switch + timedelta(minutes=5) - datetime.now()
+        difference = last_acquired_switch + timedelta(minutes=2) - datetime.now()
 
         while difference > timedelta(minutes=0):
             _logger.info("Currently waiting for the switch to be available again")
             _logger.info(f"next check in {int(difference.total_seconds()) % 60} minutes")
             await asyncio.sleep(difference.total_seconds())
-            difference = last_acquired_switch + timedelta(minutes=5) - datetime.now()
+            difference = last_acquired_switch + timedelta(minutes=2) - datetime.now()
 
         # Notify the corresponding function (departure_event or arrival_event) to acquire the switch
         func_codes[int(data[0])].set()
 
         # Send an update message to the GUI
         modbus_data_queue.put(["S", str(switch_status)])
+
+        # give the train 60 seconds to arrive/depart
+        await asyncio.sleep(60)
 
 
 async def update_arrival() -> None:
