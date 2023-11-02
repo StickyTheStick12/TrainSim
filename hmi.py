@@ -70,6 +70,9 @@ modbus_data_queue = multiprocessing.Queue()
 app = Flask(__name__)
 app.logger.setLevel(logging.ERROR)
 
+log = logging.getLogger('werkzeug')
+log.setLevel(logging.ERROR)
+
 # Sessions för login
 app.secret_key = b'_5#y2L"F4Q8z\n\xec]/'
 
@@ -93,7 +96,7 @@ class Users(UserMixin):
         self.is_active = value
         return
 
-withc
+
 @login_manager.user_loader
 def loader_user(user_id):
     # Här måste vi löser ett säkrare sätt
@@ -382,21 +385,15 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
 
     func_code = 3  # function code for modbus that we want to read and write data from holding register
     slave_id = 0x00  # we broadcast the data to all the connected slaves
-    address = 0x00  # the address to where we want to write in the holding register
     sequence_number = 0
     secret_key = b'gf8VdJD8W4Z8t36FuUPHI1A_V2ysBZQkBS8Tmy83L44='
 
-    context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
-    context.load_cert_chain(certfile=cert, keyfile=key)
-
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server_socket.bind(("localhost", 12346))
-    server_socket.listen(1)
+    server_socket.listen()
+    connection, address = server_socket.accept()
 
-    ssl_socket, client_address = context.wrap_socket(server_socket, server_side=True)
-    connection, client_address = ssl_socket.accept()
-
-    # overwrite old data in json file
+    # remove old json files
     try:
         _logger.info("Removed old files")
         os.remove("departure.json")
@@ -1190,7 +1187,7 @@ if __name__ == '__main__':
     modbus_process = multiprocessing.Process(target=modbus_helper)
     modbus_process.start()
 
-    while True:
-        pass
+    app.run(ssl_context=(cert, key), debug=False, port="5001")
+    SQL.closeSession()
 
     modbus_process.join()
