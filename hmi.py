@@ -57,11 +57,11 @@ track4 = asyncio.Event()
 track5 = asyncio.Event()
 track6 = asyncio.Event()
 
-track_status = [track1, track2, track3, track4, track5,
-                track6]  # this is the track_status that the trains use when deciding on a track.
+track_status_sim = [track1, track2, track3, track4, track5, track6]  # this is the track_status that the trains use 
+# when deciding on a track.
 real_track_status = ["A"] * 6  # this is the actual representation if a track is available or not (attack control)
 
-switch_status = 1  # 0 - 6
+switch_status = 1  # 1 - 6
 
 modbus_data_queue = multiprocessing.Queue()
 
@@ -301,11 +301,12 @@ def writeToJson(json_file, data_json):
 
 
 def logData(json_data, action, information):
-    '''Någon form utav erorr hantering'''
+    """Någon form utav erorr hantering"""
     try:
         currentDateTime = datetime.now()
         currentDateTime = currentDateTime.strftime('%Y-%m-%d || %H:%M:%S')
-        logInformation = f"[{currentDateTime}] Done by User: {session['username']}, Action: {action}, Information: {information}"
+        logInformation = (f"[{currentDateTime}] Done by User: {session['username']}, Action: {action}, "
+                          f"Information: {information}")
 
         json_data['logs'].append(logInformation)
     except:
@@ -413,7 +414,7 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
     for d_train in departure_data:
         if 'id' not in d_train:
             _logger.info(f"Found train and occupied track {d_train['TrackAtLocation']}")
-            track_status[int(d_train['TrackAtLocation'])-1].set()
+            track_status_sim[int(d_train['TrackAtLocation'])-1].set()
             real_track_status[int(d_train['TrackAtLocation'])-1] = "O"
             modbus_data_queue.put(["T", d_train['TrackAtLocation'], "O"])
         else:
@@ -459,7 +460,6 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
         # h: inserts a new time in the json files
         # Packet ["h", "AdvertisedTimeArrival", "AdvertisedTimeDeparture", "ToLocation", Track]
 
-
         # ----------------- SIMULATION ----------------- #
         # a: A "status" message that a train has arrived at the station. Updates the real track status. Attack helper.
         # Packet: ["a", id, track]
@@ -473,8 +473,6 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
 
         # u: update the departure track in the json file for a specific train
         # Paket ["u", "id", "track"]
-
-
 
         # ----------------- GUI ----------------- #
         # A: Adds a new train to the timetable in the gui.
@@ -509,7 +507,7 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                 _logger.info("Received arrival update from a train")
 
                 if real_track_status[switch_status - 1] == "O":
-                    # we have a crash since we tried to drive into a already occupied track
+                    # we have a crash since we tried to drive into an already occupied track
                     modbus_data_queue.put(["P", "A train collided while trying to drive into the station"])
                 else:
                     real_track_status[switch_status - 1] = "O"
@@ -599,7 +597,7 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                                                   "in the wrong position"])
 
                                     # clear track
-                                    track_status[data[1] - 1].clear()
+                                    track_status_sim[data[1] - 1].clear()
                                     real_track_status[data[1] - 1] = "A"
                                     _logger.info("Cleared track")
                                     modbus_data_queue.put(["R", data[2]])
@@ -613,10 +611,10 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                 _logger.info("Received track status update")
 
                 if data[2] == "O":
-                    track_status[data[1]-1].set()
+                    track_status_sim[data[1]-1].set()
                     _logger.info("Occupied track")
                 else:
-                    track_status.clear()
+                    track_status_sim[data[1]-1].clear()
                     _logger.info("Cleared track")
             case "u":
                 _logger.info("Received wish to update track for departure from simulation")
@@ -628,7 +626,8 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                             if json_data[i]["id"] == data[1]:
                                 json_data[i]["TrackAtLocation"] = data[2]
                                 modbus_data_queue.put(
-                                    ["U", json_data[i]["id"], json_data[i]['EstimatedTime'], json_data[i]["TrackAtLocation"]])
+                                    ["U", json_data[i]["id"], json_data[i]['EstimatedTime'], 
+                                     json_data[i]["TrackAtLocation"]])
                                 _logger.info("updated track in departure file")
 
                         json_file.seek(0)
@@ -881,14 +880,14 @@ async def arrival() -> None:
             # Retrieve the track number from the JSON data
             track_number = int(first_entry['TrackAtLocation'])
 
-            if not track_status[track_number - 1].is_set():
+            if not track_status_sim[track_number - 1].is_set():
                 # If the track is available, occupy it and update track status
                 _logger.info("Track was available for arrival")
                 modbus_data_queue.put(["s", 1, str(track_number)])
                 modbus_data_queue.put(["t", track_number, "O"])
             else:
                 for i in range(6):
-                    if not track_status[i].is_set():
+                    if not track_status_sim[i].is_set():
                         # If the alternate track is available, occupy it and update track status
                         _logger.info("Original track wasn't available, chose another track instead")
                         track_number = i + 1
@@ -902,21 +901,21 @@ async def arrival() -> None:
 
                     # await the departure of a train to be able to get a track
                     _logger.info("No track available. Waiting for a clear track")
-                    _, pending = await asyncio.wait([track_status[i].wait() for i in range(6)],
+                    _, pending = await asyncio.wait([track_status_sim[i].wait() for i in range(6)],
                                                     return_when=asyncio.FIRST_COMPLETED)
 
                     # TODO maybe check when the first track will be available and update the departure from that
 
                     _logger.info("A track is available")
 
-                if not track_status[track_number - 1].is_set():
+                if not track_status_sim[track_number - 1].is_set():
                     # If the track is available, occupy it and update track status
                     _logger.info("Original track was available for arrival")
                     modbus_data_queue.put(["s", 1, str(track_number)])
                     modbus_data_queue.put(["t", track_number, "O"])
                 else:
                     for i in range(6):
-                        if not track_status[i].is_set():
+                        if not track_status_sim[i].is_set():
                             # If the alternate track is available, occupy it and update track status
                             _logger.info("Original track wasn't available, chose another track instead")
                             track_number = i + 1
@@ -966,8 +965,6 @@ async def arrival() -> None:
                             json_data.pop(0)
                             json_data = json.load(json_file)
                             json.dump(json_data, json_file, indent=2)
-
-
                 except (FileNotFoundError, json.JSONDecodeError):
                     # Handle file not found or JSON decoding errors and log an error message
                     _logger.error("Error reading arrival.json file.")
@@ -975,8 +972,10 @@ async def arrival() -> None:
                 # sleep 0.5 seconds so we can send data to the gui so it will show that the train has arrived
                 await asyncio.sleep(0.5)
 
+
 async def acquire_switch(switch_queue: asyncio.Queue) -> None:
-    """Empties the switch queue and keeps track of when the switch will be available, then notifies the correct function."""
+    """Empties the switch queue and keeps track of when the switch will be available, 
+    then notifies the correct function."""
 
     global switch_status
     while True:
@@ -1167,7 +1166,8 @@ async def update_departure() -> None:
                 new_train_info.get('EstimatedTimeAtLocation', new_train_info['AdvertisedTimeAtLocation']),
                 "%Y-%m-%dT%H:%M:%S.%f%z").strftime("%Y-%m-%d %H:%M")
 
-            to_location = "Köpenhamn" if any(location.get('LocationName') == 'Dk.kh' for location in new_train_info.get("ToLocation", [])) else "Emmaboda"
+            to_location = "Köpenhamn" if any(location.get('LocationName') == 'Dk.kh' for location in 
+                                             new_train_info.get("ToLocation", [])) else "Emmaboda"
 
             if new_train_info['TrackAtLocation'] != "-":
                 train_data = {
@@ -1214,10 +1214,10 @@ async def train_match() -> None:
     # creates one bestmatch which contains the departure train that needs to be updated
     bestmatch = departure_data[0]
     timedelta0 = timedelta(hours=0)
+    
     for atrain in arrival_data:
-
         # if the train doesnt have an id
-        if (len(atrain) == 3):
+        if len(atrain) == 3:
 
             # makes the atrain advertised time into a comparable format
             formatted_str = atrain['AdvertisedTime'].replace('-', ' ').replace(' ', ':')
@@ -1225,7 +1225,7 @@ async def train_match() -> None:
             for dtrain in departure_data:
 
                 # if the dtrain is on the same track as the atrain and it doesnt have an id
-                if (dtrain['TrackAtLocation'] == atrain['TrackAtLocation'] and len(dtrain) == 4):
+                if dtrain['TrackAtLocation'] == atrain['TrackAtLocation'] and len(dtrain) == 4:
 
                     # makes the dtrain advertised time into a comparable format
                     formatted_str = dtrain['AdvertisedTime'].replace('-', ' ').replace(' ', ':')
@@ -1259,3 +1259,4 @@ if __name__ == '__main__':
     SQL.closeSession()
 
     modbus_process.join()
+    
