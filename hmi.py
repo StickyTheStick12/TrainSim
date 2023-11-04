@@ -37,8 +37,6 @@ modbus_port = 12345
 cert = r"cert.pem"
 key = r"key.pem"
 
-train_sent_away = False
-lock = asyncio.Lock()
 arrival_file_mutex = asyncio.Lock()
 departure_file_mutex = asyncio.Lock()
 hmi_mutex = multiprocessing.Lock()
@@ -46,7 +44,6 @@ hmi_mutex = multiprocessing.Lock()
 last_acquired_switch = datetime.now() - timedelta(minutes=3)
 departure_event = asyncio.Event()
 arrival_event = asyncio.Event()
-train_id_update_event = asyncio.Event()
 
 wake_arrival = asyncio.Event()
 wake_departure = asyncio.Event()
@@ -81,15 +78,6 @@ login_manager = LoginManager()
 login_manager.init_app(app)
 
 mutex = multiprocessing.Lock()
-
-
-# When we call update arrival. We want to compare every estimated time. They will be sorted when they arrive so we will make an educated guess on when the train first can arrive/depart
-# merge arrival and departure to one list. This list will be sorted. We can now loop thorugh the list and see if any of these times will collide which means they have to wait 3 minutes for each train
-# this will make the arrival and departure list updated so it we don't have to wake up unnecessarliy at the same time we will have more correct times in the time table. We can't know for sure that the times wil
-# be correct due to the fact that we can change the switch in the hmi. Because of this we will update the time accordingly in the estimated time. This means that we have to rebuild the timedata.
-
-# When we insert a new object in the timetable find every occurence prior and find the time difference to the estimated time
-# The trains from the hmi will need a seperate identfier so we will update that estimated time by the advertised time instead. The other trains we will use the estimated time. Otherwise we will push that train further and further away if a train is late
 
 
 class Users(UserMixin):
@@ -301,7 +289,7 @@ def logPage():
 
 
 def open_json(json_file):
-    with open(json_file, 'r') as dataFile:
+    with mutex, open(json_file, 'r') as dataFile:
         json_data = json.load(dataFile)
     return json_data
 
@@ -384,351 +372,373 @@ def setup_server() -> ModbusServerContext:
 
 
 async def handle_simulation_communication(context: ModbusServerContext) -> None:
-        """Takes data from queue and sends to client"""
-        global last_acquired_switch
-        global switch_status
-        global modbus_data_queue
-        global train_sent_away
+    """Takes data from queue and sends to client"""
+    global last_acquired_switch
+    global switch_status
+    global modbus_data_queue
 
-        loop = asyncio.get_event_loop()
-        switch_queue = asyncio.Queue()
+    loop = asyncio.get_event_loop()
+    switch_queue = asyncio.Queue()
 
-        func_code = 3  # function code for modbus that we want to read and write data from holding register
-        slave_id = 0x00  # we broadcast the data to all the connected slaves
-        address = 0x00
+    func_code = 3  # function code for modbus that we want to read and write data from holding register
+    slave_id = 0x00  # we broadcast the data to all the connected slaves
+    address = 0x00
 
-        sequence_number = 0
-        secret_key = b'gf8VdJD8W4Z8t36FuUPHI1A_V2ysBZQkBS8Tmy83L44='
+    sequence_number = 0
+    secret_key = b'gf8VdJD8W4Z8t36FuUPHI1A_V2ysBZQkBS8Tmy83L44='
 
-        # remove old json files
+    # remove old json files
+    try:
+        _logger.info("Removed old files")
+        os.remove("departure.json")
+        os.remove("arrival.json")
+    except FileNotFoundError:
+        pass
+
+    # we then start the tasks and this process continues with the above things
+    loop.create_task(update_departure())
+    loop.create_task(update_arrival())
+    loop.create_task(train_match())
+
+    # wait so we have time to update the json files
+    await asyncio.sleep(2)
+
+    async with departure_file_mutex:
+        with open('departure.json', 'r') as departures:
+            departure_data = json.load(departures)
+
+    success = False
+
+    _logger.info("Finding tracks where a train already has arrived to")
+    for d_train in departure_data:
+        if 'id' not in d_train:
+            _logger.info(f"Found train and occupied track {d_train['TrackAtLocation']}")
+            track_status[int(d_train['TrackAtLocation'])-1].set()
+            real_track_status[int(d_train['TrackAtLocation'])-1] = "O"
+            modbus_data_queue.put(["T", d_train['TrackAtLocation'], "O"])
+        else:
+            if success:
+                break
+            success = True
+
+    loop.create_task(arrival())
+    loop.create_task(departure())
+    loop.create_task(acquire_switch(switch_queue))
+
+    # wait until client has connected
+    while context[slave_id].getValues(func_code, datastore_size - 2, 1) == [0]:
+        _logger.info("Waiting for client to connect; sleeping 2 second")
+        await asyncio.sleep(2)  # give the server control so it can answer the client
+
+    _logger.info("Client has connected to modbus")
+
+    while True:
         try:
-            _logger.info("Removed old files")
-            os.remove("departure.json")
-            os.remove("arrival.json")
-        except FileNotFoundError:
-            pass
+            reader, writer = await asyncio.open_connection('localhost', 12346)
+            break  # Break out of the loop if connection is successful
+        except ConnectionRefusedError:
+            _logger.info("Connection to asyncio server failed. Retrying...")
+            await asyncio.sleep(1)  # Wait for a while before retrying
 
-        # we then start the tasks and this process continues with the above things
-        loop.create_task(update_departure())
-        loop.create_task(update_arrival())
-        loop.create_task(train_match())
+    _logger.info("Connected to asyncio server")
 
-        # wait so we have time to update the json files
-        await asyncio.sleep(2)
+    while True:
+        # Run blocking call in executor so all the other tasks can run and the server
+        data = await loop.run_in_executor(None, modbus_data_queue.get)
 
-        async with departure_file_mutex:
-            with open('departure.json', 'r') as departures:
-                departure_data = json.load(departures)
+        # ----------------- HMI ----------------- #
+        # s: helps handling the request for the switch and updates last acquired switch time.
+        # Packet: ["s", 2, "track_number"]
 
-        success = False
+        # r: Removes a train from the station. Checks whether the switch was in the correct position or not
+        # Packet ["r", track, "id"]
 
-        _logger.info("Finding tracks where a train already has arrived to")
-        for d_train in departure_data:
-            if 'id' not in d_train:
-                _logger.info(f"Found train and occupied track {d_train['TrackAtLocation']}")
-                track_status[int(d_train['TrackAtLocation'])-1].set()
-                real_track_status[int(d_train['TrackAtLocation'])-1] = "O"
-            else:
-                if success:
-                    break
-                success = True
+        # t: message from the hmi to change track status, to the simulation
+        # Packet ["t", track, "status"]  --> track is an int
 
-        loop.create_task(arrival())
-        loop.create_task(departure())
-        loop.create_task(acquire_switch(switch_queue))
-
-        # wait until client has connected
-        while context[slave_id].getValues(func_code, datastore_size - 2, 1) == [0]:
-            _logger.info("Waiting for client to connect; sleeping 2 second")
-            await asyncio.sleep(2)  # give the server control so it can answer the client
-
-        _logger.info("Client has connected to modbus")
-
-        while True:
-            try:
-                reader, writer = await asyncio.open_connection('localhost', 12346)
-                break  # Break out of the loop if connection is successful
-            except ConnectionRefusedError:
-                _logger.info("Connection to asyncio failed. Retrying...")
-                await asyncio.sleep(1)  # Wait for a while before retrying
-
-        _logger.info("Connected to asyncio")
-
-        while True:
-            # Run blocking call in executor so all the other tasks can run and the server
-            data = await loop.run_in_executor(None, modbus_data_queue.get)
-
-            # ----------------- HMI ----------------- #
-            # s: helps handling the request for the switch and updates last acquired switch time.
-            # Packet: ["s", 2, "track_number"]
-
-            # r: Removes a train from the station. Checks whether the switch was in the correct position or not
-            # Packet ["r", track, "id"]
-
-            # t: message from the hmi to change track status, to the simulation
-            # Packet ["t", track, "status"]  --> track is an int
-
-            # h: inserts a new time in the json files
-            # Packet ["h", "AdvertisedTimeArrival", "AdvertisedTimeDeparture", "ToLocation", Track]
+        # h: inserts a new time in the json files
+        # Packet ["h", "AdvertisedTimeArrival", "AdvertisedTimeDeparture", "ToLocation", Track]
 
 
-            # ----------------- SIMULATION ----------------- #
-            # a: A "status" message that a train has arrived at the station. Updates the real track status. Attack helper.
-            # Packet: ["a", id, track]
+        # ----------------- SIMULATION ----------------- #
+        # a: A "status" message that a train has arrived at the station. Updates the real track status. Attack helper.
+        # Packet: ["a", id, track]
 
-            # s: helps handling the request for the switch and updates last acquired switch time.
-            # Packet: ["s", func_code, "track_number", (func_code 1 only) "arrival time"]
-            # func_code: 0: departure, 1: arrival
+        # s: helps handling the request for the switch and updates last acquired switch time.
+        # Packet: ["s", func_code, "track_number", (func_code 1 only) "arrival time"]
+        # func_code: 0: departure, 1: arrival
 
-            # r: Removes a train from the station. Checks whether the switch was in the correct position or not
-            # Packet ["r", track, "id"]
+        # r: Removes a train from the station. Checks whether the switch was in the correct position or not
+        # Packet ["r", track, "id"]
 
-            # u: update the departure track in the json file for a specific train
-            # Paket ["u", "AdvertisedTime", "track"]
+        # u: update the departure track in the json file for a specific train
+        # Paket ["u", "id", "track"]
 
 
 
-            # ----------------- GUI ----------------- #
-            # A: Adds a new train to the timetable in the gui.
-            # Packet: ["A", "TrainId", "EstimatedTime", "ToLocation", "Track"]
+        # ----------------- GUI ----------------- #
+        # A: Adds a new train to the timetable in the gui.
+        # Packet: ["A", "TrainId", "EstimatedTime", "ToLocation", "Track"]
 
-            # S: Sends the new status of the switch to the gui.
-            # Packet: ["S", "switch_status"]
+        # S: Sends the new status of the switch to the gui.
+        # Packet: ["S", "switch_status"]
 
-            # R: sends a remove train message to the gui.
-            # Packet ["R", "id"]
+        # R: sends a remove train message to the gui.
+        # Packet ["R", "id"]
 
-            # P: Sends a problem message to the gui, that an attack has happened.
-            # Packet ["P", "message"]
+        # P: Sends a problem message to the gui, that an attack has happened.
+        # Packet ["P", "message"]
 
-            # T: message to gui to change track status
-            # Packet ["T", "track", "status"]
+        # T: message to gui to change track status
+        # Packet ["T", "track", "status"]
 
-            # U: update the departure in the gui
-            # Packet ["U", "AdvertisedTime", EstimatedTime, "track"]
+        # U: update the departure in the gui
+        # Packet ["U", "id", EstimatedTime, "track"]
 
-            # K: update the key for the gui
-            # Packet ["K", b"key", b"encrypted new key"]
+        # K: update the key for the gui
+        # Packet ["K", b"key", b"encrypted new key"]
 
-            # H: arrival package to the gui. Marks that a train has arrived and to which track it has arrived
-            # Packet: ["H", track]
+        # H: arrival package to the gui. Marks that a train has arrived and to which track it has arrived
+        # Packet: ["H", "track"]
 
-            # B: Remove a train from the timetable. Only send if train hasn't arrived yet.
-            # Packet: ["B", "id"]
+        # B: Remove a train from the timetable. Only send if train hasn't arrived yet.
+        # Packet: ["B", "id"]
 
-            match data[0]:
-                case "a":
-                    _logger.info("Received arrival update from a train")
+        match data[0]:
+            case "a":
+                _logger.info("Received arrival update from a train")
 
-                    if real_track_status[switch_status - 1] == "O":
-                        # we have a crash since we tried to drive into a already occupied track
-                        modbus_data_queue.put(["P", "A train collided while trying to drive into the station"])
-                    else:
-                        real_track_status[switch_status - 1] = "O"
+                if real_track_status[switch_status - 1] == "O":
+                    # we have a crash since we tried to drive into a already occupied track
+                    modbus_data_queue.put(["P", "A train collided while trying to drive into the station"])
+                else:
+                    real_track_status[switch_status - 1] = "O"
 
-                    if switch_status != int(data[2]):
-                        _logger.info("Updating track in json, due to switch status being different to expected track")
+                if switch_status != int(data[2]):
+                    _logger.info("Updating track in json, due to switch status being different to expected track")
 
-                        #async with arrival_file_mutex:
-                         #   try:
-                          #      with open('arrival.json', 'r+') as json_file:
-                           #         json_data = json.load(json_file)
-                            #        json_data[0]["TrackAtLocation"] = str(switch_status)
-                             #       json_file.seek(0)
-                              #      json.dump(json_data, json_file, indent=2)
-                            #except FileNotFoundError:
-                             #   _logger.error("arrival.json isn't found")
-                        modbus_data_queue.put(["H", str(switch_status)])
-                        modbus_data_queue.put(["u", data[1], str(switch_status)])
-                case "s":
-                    if data[1] == 2:
-                        _logger.info("Received switch update from hmi")
-                        switch_status = int(data[2])
-                        last_acquired_switch = datetime.now()
-                        modbus_data_queue.put(["S", data[2]])
-                    else:
-                        _logger.info("Received switch update from simulation")
-                        await switch_queue.put(data[1:])
+                    modbus_data_queue.put(["H", str(switch_status)])
+                    modbus_data_queue.put(["u", data[1], str(switch_status)])
+            case "s":
+                if data[1] == 2:
+                    _logger.info("Received switch update from hmi")
+                    switch_status = int(data[2])
+                    last_acquired_switch = datetime.now()
+                    modbus_data_queue.put(["S", data[2]])
+                else:
+                    _logger.info("Received switch update from simulation")
+                    await switch_queue.put(data[1:])
 
-                        difference = max((last_acquired_switch - datetime.now()).total_seconds(), 0)
-                        update_time = (3 * 60 * switch_queue.qsize() + difference) // 60  # Convert to minutes
+                    difference = max((last_acquired_switch - datetime.now()).total_seconds(), 0)
+                    update_time = (3 * 60 * switch_queue.qsize() + difference) // 60  # Convert to minutes
 
-                        if data[1] == 0:
-                            _logger.info("Received switch update from departure function")
-                            async with departure_file_mutex:
-                                with open('departure.json', 'r+') as json_file:
-                                    json_data = json.load(json_file)
-                                    json_data[0]["EstimatedTime"] = (datetime.now() + timedelta(
-                                        minutes=update_time)).strftime("%Y-%m-%d %H:%M")
-
-                                    json_file.seek(0)
-                                    json.dump(json_data, json_file, indent=2)
-
-                            modbus_data_queue.put(["U", json_data[0]['AdvertisedTime'], json_data[0]['EstimatedTime'],
-                                                   json_data[0]['TrackAtLocation']])
-                        else:
-                            _logger.info("Received switch update from arrival function")
-                            async with arrival_file_mutex:
-                                with open('arrival.json', 'r+') as json_file:
-                                    json_data = json.load(json_file)
-                                    json_data[0]["EstimatedTime"] = (datetime.now() + timedelta(
-                                        minutes=update_time)).strftime("%Y-%m-%d %H:%M")
-
-                                    json_file.seek(0)
-                                    _logger.info(f"writing {json_data}")
-                                    json_file.write(json.dumps(json_data, indent=2))
-                case "r":
-                    _logger.info("Received removal wish")
-
-                    async with arrival_file_mutex:
-                        with open('arrival.json', 'r') as json_file:
-                            json_data = json.load(json_file)
-
-                    has_arrived = True
-
-                    for idx, train in enumerate(json_data):
-                        if 'id' in train and train['id'] == data[2]:
-                            has_arrived = False
-
-                            if idx == 0:
-                                # TODO we have a problem if we try to remove a train if it is arrving in three minutes
-                                wake_arrival.set()
-
-                            del json_data[idx]
-
-                            async with arrival_file_mutex:
-                                with open('arrival.json', 'w') as json_file:
-                                    json.dump(json_data, json_file, indent=2)
-
-                            break
-
-                    if not has_arrived:
+                    if data[1] == 0:
+                        _logger.info("Received switch update from departure function")
                         async with departure_file_mutex:
-                            with open('departure.json', 'r+'):
+                            with open('departure.json', 'r+') as json_file:
                                 json_data = json.load(json_file)
+                                json_data[0]["EstimatedTime"] = (datetime.now() + timedelta(
+                                    minutes=update_time)).strftime("%Y-%m-%d %H:%M")
 
-                                for idx,train in enumerate(json_data):
-                                    if 'id' in train and train['id'] == data[2]:
-                                        del json_data[idx]
-
-                                    break
-
+                                json_file.seek(0)
                                 json.dump(json_data, json_file, indent=2)
+
+                        modbus_data_queue.put(["U", json_data[0]['id'], json_data[0]['EstimatedTime'],
+                                               json_data[0]['TrackAtLocation']])
                     else:
-                        if switch_status != data[1]:
-                            modbus_data_queue.put(
-                                ["P", "A train had greenlight and was allowed to leave but switch was in the wrong position"])
+                        _logger.info("Received switch update from arrival function")
+                        async with arrival_file_mutex:
+                            with open('arrival.json', 'r+') as json_file:
+                                json_data = json.load(json_file)
+                                json_data[0]["EstimatedTime"] = (datetime.now() + timedelta(
+                                    minutes=update_time)).strftime("%Y-%m-%d %H:%M")
 
-                        # clear track
-                        track_status[data[1] - 1].clear()
-                        real_track_status[data[1] - 1] = "A"
-                        modbus_data_queue.put(["R", data[2]])
-                case "t":
-                    _logger.info("Received track status update")
+                                json_file.seek(0)
+                                _logger.info(f"writing {json_data}")
+                                json_file.write(json.dumps(json_data, indent=2))
+            case "r":
+                _logger.info("Received removal wish")
 
-                    if data[2] == "O":
-                        track_status[data[1]-1].set()
-                        _logger.info("Occupied track")
+                async with arrival_file_mutex:
+                    with open('arrival.json', 'r') as json_file:
+                        json_data = json.load(json_file)
+
+                has_arrived = True
+
+                for idx, train in enumerate(json_data):
+                    if 'id' in train and train['id'] == data[2]:
+                        has_arrived = False
+                        _logger.info("Train hasn't arrived yet")
+                        if idx == 0:
+                            # TODO we have a problem if we try to remove a train if it is arrving in three minutes
+                            wake_arrival.set()
+
+                        del json_data[idx]
+
+                        async with arrival_file_mutex:
+                            with open('arrival.json', 'w') as json_file:
+                                json.dump(json_data, json_file, indent=2)
+
+                        break
+
+                async with departure_file_mutex:
+                    with open('departure.json', 'r+'):
+                        json_data = json.load(json_file)
+
+                        for idx, train in enumerate(json_data):
+                            if 'id' in train and train['id'] == data[2]:
+                                # wake departure function if this is the first train to depart
+                                if idx == 0:
+                                    wake_departure.set()
+                                    _logger.info("Woke departure function")
+
+                                if has_arrived:
+                                    if switch_status != data[1]:
+                                        modbus_data_queue.put(
+                                            ["P", "A train had greenlight and was allowed to leave but switch was "
+                                                  "in the wrong position"])
+
+                                    # clear track
+                                    track_status[data[1] - 1].clear()
+                                    real_track_status[data[1] - 1] = "A"
+                                    _logger.info("Cleared track")
+                                    modbus_data_queue.put(["R", data[2]])
+                                else:
+                                    modbus_data_queue.put(["B", data[2]])
+
+                                del json_data[idx]
+                                json.dump(json_data, json_file, indent=2)
+                                break
+            case "t":
+                _logger.info("Received track status update")
+
+                if data[2] == "O":
+                    track_status[data[1]-1].set()
+                    _logger.info("Occupied track")
+                else:
+                    track_status.clear()
+                    _logger.info("Cleared track")
+            case "u":
+                _logger.info("Received wish to update track for departure from simulation")
+                async with departure_file_mutex:
+                    with open("departure.json", "r+") as json_file:
+                        json_data = json.load(json_file)
+
+                        for i in range(len(json_data)):
+                            if json_data[i]["id"] == data[1]:
+                                json_data[i]["TrackAtLocation"] = data[2]
+                                modbus_data_queue.put(
+                                    ["U", json_data[i]["id"], json_data[i]['EstimatedTime'], json_data[i]["TrackAtLocation"]])
+                                _logger.info("updated track in departure file")
+
+                        json_file.seek(0)
+                        json.dump(json_data, json_file, indent=2)
+            case "h":
+                _logger.info("Received a new train from hmi")
+
+                current_time = datetime.now()
+                today_date = current_time.date()
+                recv_time = datetime.combine(today_date, datetime.strptime(data[2], "%H:%M").time())
+
+                if recv_time < current_time:
+                    recv_time += timedelta(days=1)
+
+                arrival_time = recv_time - timedelta(minutes=3)
+
+                train_data = {'AdvertisedTime': arrival_time.strftime("%Y-%m-%d %H:%M"),
+                              'EstimatedTime': arrival_time.strftime("%Y-%m-%d %H:%M"), 'TrackAtLocation': data[4]}
+
+                async with arrival_file_mutex:
+                    with open('arrival.json', 'r') as arrivals:
+                        arrival_data = json.load(arrivals)
+
+                existing_times = [item['EstimatedTime'] for item in arrival_data]
+                arrival_index = bisect.bisect_left(existing_times, train_data['EstimatedTime'])
+                arrival_data.insert(arrival_index, train_data)
+
+                async with arrival_file_mutex:
+                    with open('arrival.json', 'w') as arrivals:
+                        json.dump(arrival_data, arrivals, indent=2)
+
+                train_data = {'AdvertisedTime': recv_time, 'EstimatedTime': recv_time, 'ToLocation': data[3],
+                              'TrackAtLocation': data[4]}
+
+                async with departure_file_mutex:
+                    with open('departure.json', 'r') as departures:
+                        departure_data = json.load(departures)
+
+                existing_times = [item['EstimatedTime'] for item in departure_data]
+                departure_index = bisect.bisect_left(existing_times, train_data['EstimatedTime'])
+                departure_data.insert(departure_index, train_data)
+
+                async with departure_file_mutex:
+                    with open('departure.json', 'w') as departures:
+                        json.dump(departure_data, departures, indent=2)
+
+                await train_match()
+
+                if arrival_index == 0:
+                    wake_arrival.set()
+
+                if departure_index == 0:
+                    wake_departure.set()
+
+                async with arrival_file_mutex:
+                    with open('arrival.json', 'r') as arrivals:
+                        arrival_data = json.load(arrivals)
+
+                modbus_data_queue.put(["A", arrival_data[arrival_index]['id'], recv_time, data[3], data[4]])
+            case "K":
+                secret_key = data[1]
+                writer.write(data[2])
+                await writer.drain()
+                _logger.info("sent new secret key")
+                sequence_number = 0
+            case _:
+                data = " ".join(str(value) for value in data)
+                signature = data + secret_key.decode("utf-8")
+
+                client_verified = False
+
+                while not client_verified:
+                    sequence_number += 1
+                    sha256 = hashlib.sha256()
+                    temp_signature = signature + str(sequence_number)
+                    _logger.debug(temp_signature)
+                    sha256.update(temp_signature.encode("utf-8"))
+                    temp_signature = sha256.hexdigest()
+                    nonce = [char for char in secrets.token_bytes(2)]
+
+                    if sequence_number == 100:
+                        _logger.info("Updating secret key")
+                        await update_keys(secret_key)
+
+                    data_to_send = ([sequence_number] + [len(data)] + [ord(char) for char in data] + [32] + nonce +
+                                    [32] + [ord(char) for char in temp_signature])
+
+                    sha256 = hashlib.sha256()
+
+                    _logger.debug("Sending data")
+                    context[slave_id].setValues(func_code, address, data_to_send)
+
+                    _logger.debug("Resetting flag")
+                    context[slave_id].setValues(func_code, datastore_size - 2, [0])
+
+                    expected_signature = str(nonce) + secret_key.decode("utf-8")
+                    _logger.debug(f"nonce {str(nonce)}")
+                    sha256.update(expected_signature.encode("utf-8"))
+                    expected_signature = [ord(char) for char in sha256.hexdigest()]
+                    _logger.debug(f"Expecting: {expected_signature}")
+
+                    while context[slave_id].getValues(func_code, datastore_size - 2, 1) == [0]:
+                        _logger.info("Waiting for client to copy datastore; sleeping 2 second")
+                        await asyncio.sleep(2)  # give the server control so it can answer the client
+
+                    if context[slave_id].getValues(func_code, 0, 64) == expected_signature:
+                        _logger.info("Client is verified")
+                        client_verified = True
                     else:
-                        track_status.clear()
-                        _logger.info("Cleared track")
-                case "u":
-                    async with departure_file_mutex:
-                        with open("departure.json", "r+") as json_file:
-                            json_data = json.load(json_file)
-
-                            for i in range(len(json_data)):
-                                if json_data[i]["id"] == data[1]:
-                                    json_data[i]["TrackAtLocation"] = data[2]
-                                    modbus_data_queue.put(
-                                        ["U", json_data[i]["id"], json_data[i]['EstimatedTime'], json_data[i]["TrackAtLocation"]])
-
-                            json_file.seek(0)
-                            json.dump(json_data, json_file, indent=2)
-                case "h":
-                    train_data = {'AdvertisedTime': data[2], 'EstimatedTime': data[2], 'ToLocation': data[3],
-                                  'TrackAtLocation': data[4]}
-                    async with departure_file_mutex:
-                        with open('departure.json', 'r') as departures:
-                            departure_data = json.load(departures)
-                    existing_times = [item['AdvertisedTime'] for item in departure_data]
-                    insert_index = bisect.bisect_left(existing_times, train_data['AdvertisedTime'])
-
-                    departure_data.insert(insert_index, train_data)
-                    async with departure_file_mutex:
-                        with open('departure.json', 'w') as departures:
-                            json.dump(departure_data, departures, indent=2)
-
-                    if insert_index == 0:
-                        wake_departure.set()
-
-                    modbus_data_queue.put(["A", data[1], data[3], data[4]])
-                    arrival_time = datetime.strptime(data[2], "%Y-%m-%d %H:%M") - timedelta(minutes=3)
-                    train_data = {'AdvertisedTime':arrival_time, 'EstimatedTime': arrival_time, 'TrackAtLocation': data[4]}
-
-                    async with arrival_file_mutex:
-                        with open('arrival.json', 'r') as arrivals:
-                            arrival_data = json.load(arrivals)
-                    existing_times = [item['AdvertisedTime'] for item in arrival_data]
-                    insert_index = bisect.bisect_left(existing_times, train_data['AdvertisedTime'])
-                    arrival_data.insert(insert_index, train_data)
-                    async with arrival_file_mutex:
-                        with open('arrival.json', 'w') as arrivals:
-                            json.dump(arrival_data, arrivals, indent=2)
-
-                    if insert_index == 0:
-                        wake_arrival.set()
-                case "K":
-                    secret_key = data[1]
-                    writer.write(data[2])
-                    await writer.drain()
-                    _logger.info("sent new secret key")
-                    sequence_number = 0
-                case _:
-                    data = " ".join(str(value) for value in data)
-                    signature = data + secret_key.decode("utf-8")
-
-                    client_verified = False
-
-                    while not client_verified:
-                        sequence_number += 1
-                        sha256 = hashlib.sha256()
-                        temp_signature = signature + str(sequence_number)
-                        _logger.debug(temp_signature)
-                        sha256.update(temp_signature.encode("utf-8"))
-                        temp_signature = sha256.hexdigest()
-                        nonce = [char for char in secrets.token_bytes(2)]
-
-                        if sequence_number == 100:
-                            _logger.info("Updating secret key")
-                            await update_keys(secret_key)
-
-                        data_to_send = ([sequence_number] + [len(data)] + [ord(char) for char in data] + [32] + nonce +
-                                        [32] + [ord(char) for char in temp_signature])
-
-                        sha256 = hashlib.sha256()
-
-                        _logger.debug("Sending data")
-                        context[slave_id].setValues(func_code, address, data_to_send)
-
-                        _logger.debug("Resetting flag")
-                        context[slave_id].setValues(func_code, datastore_size - 2, [0])
-
-                        expected_signature = str(nonce) + secret_key.decode("utf-8")
-                        _logger.debug(f"nonce {str(nonce)}")
-                        sha256.update(expected_signature.encode("utf-8"))
-                        expected_signature = [ord(char) for char in sha256.hexdigest()]
-                        _logger.debug(f"Expecting: {expected_signature}")
-
-                        while context[slave_id].getValues(func_code, datastore_size - 2, 1) == [0]:
-                            _logger.info("Waiting for client to copy datastore; sleeping 2 second")
-                            await asyncio.sleep(2)  # give the server control so it can answer the client
-
-                        if context[slave_id].getValues(func_code, 0, 64) == expected_signature:
-                            _logger.info("Client is verified")
-                            client_verified = True
-                        else:
-                            _logger.critical("Found wrong signature in holding register")
+                        _logger.critical("Found wrong signature in holding register")
 
 
 def modbus_helper() -> None:
@@ -745,17 +755,12 @@ def modbus_helper() -> None:
 async def departure() -> None:
     """Simulates control for departing trains from the train station.
     Tries to acquire the switch so it is at the correct track and then remove the train from the list."""
-    global train_sent_away
-    global lock
 
     while True:
         try:
             async with departure_file_mutex:
                 with open('departure.json', 'r') as json_file:
                     json_data = json.load(json_file)
-
-                async with lock:
-                    train_sent_away = False
         except (FileNotFoundError, json.JSONDecodeError):
             _logger.error("Cannot find or decode file")
 
@@ -775,13 +780,6 @@ async def departure() -> None:
             except asyncio.TimeoutError:
                 pass
 
-            # Check if the train has already been sent away
-            async with lock:
-                if train_sent_away:
-                    _logger.debug("Train sent away already")
-                    train_sent_away = False
-                    continue
-
             # Put a message in the modbus_data_queue to control the switch
             modbus_data_queue.put(["s", 0, first_entry['TrackAtLocation']])
 
@@ -790,11 +788,9 @@ async def departure() -> None:
             departure_event.clear()
 
             # Check again if the train has been sent away during the waiting period
-            async with lock:
-                if train_sent_away:
-                    _logger.debug("Train sent away already")
-                    train_sent_away = False
-                    continue
+            if wake_departure.set():
+                _logger.debug("Function has been woken")
+                continue
 
             try:
                 async with departure_file_mutex:
@@ -814,11 +810,9 @@ async def departure() -> None:
                     _logger.info("Train is late, leaving in 20 seconds")
                     await asyncio.sleep(20)
 
-                    async with lock:
-                        if train_sent_away:
-                            _logger.debug("Train sent away already")
-                            train_sent_away = False
-                            continue
+                    if wake_departure.set():
+                        _logger.debug("Function has been woken")
+                        continue
 
                     # Put a message in the modbus_data_queue to indicate train departure
                     modbus_data_queue.put(["r", int(first_entry["TrackAtLocation"]), first_entry['id']])
@@ -835,11 +829,9 @@ async def departure() -> None:
                     difference = updated_estimated_time - datetime.now()
                     await asyncio.sleep(difference.total_seconds())
 
-                    async with lock:
-                        if train_sent_away:
-                            _logger.debug("Train sent away already")
-                            train_sent_away = False
-                            continue
+                    if wake_departure.set():
+                        _logger.debug("Function has been woken")
+                        continue
 
                     # Put a message in the modbus_data_queue to indicate train departure
                     modbus_data_queue.put(["r", int(first_entry["TrackAtLocation"]), first_entry['id']])
@@ -913,7 +905,7 @@ async def arrival() -> None:
                     _, pending = await asyncio.wait([track_status[i].wait() for i in range(6)],
                                                     return_when=asyncio.FIRST_COMPLETED)
 
-                    # TODO: what we can do is update the arrival estimated time. If it is too big change departure estimatedtime
+                    # TODO maybe check when the first track will be available and update the departure from that
 
                     _logger.info("A track is available")
 
@@ -1100,7 +1092,7 @@ async def update_arrival() -> None:
     else:
         _logger.error("API response was None")
 
-    train_id_update_event.set()
+    await train_match()
 
     _logger.info(f"Sleeping 15 minutes. Next update {datetime.now() + timedelta(minutes=15):%H:%M}")
     await asyncio.sleep(15 * 60)
@@ -1139,6 +1131,7 @@ async def update_departure() -> None:
                                   for existing_train in existing_data) and new_train['TrackAtLocation'] != "-"]
 
         for new_train in new_entries:
+            # TODO we need to send an id to the gui, but we do not have an id here
             modbus_data_queue.put(["A", new_train['AdvertisedTime'], new_train['EstimatedTime'],
                                    new_train['ToLocation'], int(new_train['TrackAtLocation'])])
 
@@ -1197,8 +1190,8 @@ async def update_departure() -> None:
         _logger.info("Data has been updated in departure.json")
     else:
         _logger.error("API response is None. Check for issues with the API call.")
-    _logger.info(f"Sleeping 4 hours. Next update {(datetime.now() + timedelta(hours=4)).strftime('%H:%M')}")
-    await asyncio.sleep(4 * 60 * 60)
+    _logger.info(f"Sleeping 1 hours. Next update {(datetime.now() + timedelta(hours=1)).strftime('%H:%M')}")
+    await asyncio.sleep(1 * 60 * 60)
 
 
 async def update_keys(secret_key: bytes) -> None:
@@ -1211,55 +1204,51 @@ async def update_keys(secret_key: bytes) -> None:
 
 async def train_match() -> None:
     """compares arrivals against departures and gives train ids based on the arrival.json list"""
-    while True:
-        await train_id_update_event.wait()
-        train_id_update_event.clear()
+    timeformat = '%Y:%m:%d:%H:%M'
+    with open('departure.json', 'r') as departures:
+        departure_data = json.load(departures)
+    with open('arrival.json', 'r') as arrivals:
+        arrival_data = json.load(arrivals)
+    idcounter = 1
 
-        timeformat = '%Y:%m:%d:%H:%M'
-        with open('departure.json', 'r') as departures:
-            departure_data = json.load(departures)
-        with open('arrival.json', 'r') as arrivals:
-            arrival_data = json.load(arrivals)
-        idcounter = 1
+    # creates one bestmatch which contains the departure train that needs to be updated
+    bestmatch = departure_data[0]
+    timedelta0 = timedelta(hours=0)
+    for atrain in arrival_data:
 
-        # creates one bestmatch which contains the departure train that needs to be updated
-        bestmatch = departure_data[0]
-        timedelta0 = timedelta(hours=0)
-        for atrain in arrival_data:
+        # if the train doesnt have an id
+        if (len(atrain) == 3):
 
-            # if the train doesnt have an id
-            if (len(atrain) == 3):
+            # makes the atrain advertised time into a comparable format
+            formatted_str = atrain['AdvertisedTime'].replace('-', ' ').replace(' ', ':')
+            atraintime = datetime.strptime(formatted_str, timeformat)
+            for dtrain in departure_data:
 
-                # makes the atrain advertised time into a comparable format
-                formatted_str = atrain['AdvertisedTime'].replace('-', ' ').replace(' ', ':')
-                atraintime = datetime.strptime(formatted_str, timeformat)
-                for dtrain in departure_data:
+                # if the dtrain is on the same track as the atrain and it doesnt have an id
+                if (dtrain['TrackAtLocation'] == atrain['TrackAtLocation'] and len(dtrain) == 4):
 
-                    # if the dtrain is on the same track as the atrain and it doesnt have an id
-                    if (dtrain['TrackAtLocation'] == atrain['TrackAtLocation'] and len(dtrain) == 4):
+                    # makes the dtrain advertised time into a comparable format
+                    formatted_str = dtrain['AdvertisedTime'].replace('-', ' ').replace(' ', ':')
+                    dtraintime = datetime.strptime(formatted_str, timeformat)
 
-                        # makes the dtrain advertised time into a comparable format
-                        formatted_str = dtrain['AdvertisedTime'].replace('-', ' ').replace(' ', ':')
-                        dtraintime = datetime.strptime(formatted_str, timeformat)
+                    # compares the traintimes
+                    comparetime = dtraintime - atraintime
 
-                        # compares the traintimes
-                        comparetime = dtraintime - atraintime
+                    # if the compared train times are positive
+                    if comparetime > timedelta0:
+                        bestmatch = dtrain
+                        break
 
-                        # if the compared train times are positive
-                        if comparetime > timedelta0:
-                            bestmatch = dtrain
-                            break
+        # give atrain and bestmatch the same id then increase id
+        atrain['id'] = str(idcounter)
+        bestmatch['id'] = str(idcounter)
+        idcounter += 1
 
-            # give atrain and bestmatch the same id then increase id
-            atrain['id'] = str(idcounter)
-            bestmatch['id'] = str(idcounter)
-            idcounter += 1
+    with open('departure.json', 'w') as departures:
+        json.dump(departure_data, departures, indent=2)
 
-        with open('departure.json', 'w') as departures:
-            json.dump(departure_data, departures, indent=2)
-
-        with open('arrival.json', 'w') as arrivals:
-            json.dump(arrival_data, arrivals, indent=2)
+    with open('arrival.json', 'w') as arrivals:
+        json.dump(arrival_data, arrivals, indent=2)
 
 
 if __name__ == '__main__':
