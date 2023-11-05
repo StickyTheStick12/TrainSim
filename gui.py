@@ -250,14 +250,19 @@ def modbus_client_thread() -> None:
             client.close()
 
     async def receive_key() -> None:
-        nonlocal secret_key
-        nonlocal highest_data_id
-
-        while True:
-            data = await loop.sock_recv(client, 1024)
+        async def handle_client(reader: asyncio.StreamReader,
+                            writer: asyncio.StreamWriter) -> None:
+            nonlocal secret_key
+            nonlocal highest_data_id
+            data = await reader.read(1024)
             cipher = Fernet(secret_key)
             secret_key = cipher.decrypt(data)
             _logger.info("Updated secret key")
+            highest_data_id = 0
+
+        server = await asyncio.start_server(handle_client, "localhost", 12346)
+        async with server:
+            await server.serve_forever()
 
     loop.run_until_complete(run_client())
     loop.create_task(receive_key())
