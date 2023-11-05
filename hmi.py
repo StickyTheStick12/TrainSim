@@ -14,6 +14,8 @@ import requests
 import hashlib
 import secrets
 import os
+import hmac
+from typing import Union, List
 
 from pymodbus import __version__ as pymodbus_version
 from pymodbus.datastore import (
@@ -39,7 +41,7 @@ key = r"key.pem"
 
 arrival_file_mutex = asyncio.Lock()
 departure_file_mutex = asyncio.Lock()
-hmi_mutex = multiprocessing.Lock()
+mutex = multiprocessing.Lock()
 
 last_acquired_switch = datetime.now() - timedelta(minutes=3)
 departure_event = asyncio.Event()
@@ -48,7 +50,7 @@ arrival_event = asyncio.Event()
 wake_arrival = asyncio.Event()
 wake_departure = asyncio.Event()
 
-removed_train = asyncio.Event()
+removed_train = asyncio.Event() # todo remove
 
 track1 = asyncio.Event()
 track2 = asyncio.Event()
@@ -57,7 +59,7 @@ track4 = asyncio.Event()
 track5 = asyncio.Event()
 track6 = asyncio.Event()
 
-track_status_sim = [track1, track2, track3, track4, track5, track6]  # this is the track_status that the trains use 
+track_status_sim = [track1, track2, track3, track4, track5, track6]  # this is the track_status that the trains use
 # when deciding on a track.
 real_track_status = ["A"] * 6  # this is the actual representation if a track is available or not (attack control)
 
@@ -77,8 +79,11 @@ app.secret_key = b'_5#y2L"F4Q8z\n\xec]/'
 login_manager = LoginManager()
 login_manager.init_app(app)
 
-mutex = multiprocessing.Lock()
 
+departure_file_version = 0
+arrival_file_version = 0
+
+modbus_secret_key = b'gf8VdJD8W4Z8t36FuUPHI1A_V2ysBZQkBS8Tmy83L44='
 
 class Users(UserMixin):
     def __init__(self, username, password, is_active=True):
@@ -377,6 +382,9 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
     global last_acquired_switch
     global switch_status
     global modbus_data_queue
+    global modbus_secret_key
+    global arrival_file_version
+    global departure_file_version
 
     loop = asyncio.get_event_loop()
     switch_queue = asyncio.Queue()
@@ -386,7 +394,6 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
     address = 0x00
 
     sequence_number = 0
-    secret_key = b'gf8VdJD8W4Z8t36FuUPHI1A_V2ysBZQkBS8Tmy83L44='
 
     # remove old json files
     try:
@@ -404,9 +411,7 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
     # wait so we have time to update the json files
     await asyncio.sleep(2)
 
-    async with departure_file_mutex:
-        with open('departure.json', 'r') as departures:
-            departure_data = json.load(departures)
+    departure_data = read_from_file(1)
 
     success = False
 
@@ -532,34 +537,27 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
 
                     if data[1] == 0:
                         _logger.info("Received switch update from departure function")
-                        async with departure_file_mutex:
-                            with open('departure.json', 'r+') as json_file:
-                                json_data = json.load(json_file)
-                                json_data[0]["EstimatedTime"] = (datetime.now() + timedelta(
-                                    minutes=update_time)).strftime("%Y-%m-%d %H:%M")
 
-                                json_file.seek(0)
-                                json.dump(json_data, json_file, indent=2)
+                        json_data = read_from_file(1)
+
+                        json_data[0]["EstimatedTime"] = (datetime.now() + timedelta(
+                            minutes=update_time)).strftime("%Y-%m-%d %H:%M")
+
+                        write_to_file(json_data, 1)
 
                         modbus_data_queue.put(["U", json_data[0]['id'], json_data[0]['EstimatedTime'],
                                                json_data[0]['TrackAtLocation']])
                     else:
                         _logger.info("Received switch update from arrival function")
-                        async with arrival_file_mutex:
-                            with open('arrival.json', 'r+') as json_file:
-                                json_data = json.load(json_file)
-                                json_data[0]["EstimatedTime"] = (datetime.now() + timedelta(
-                                    minutes=update_time)).strftime("%Y-%m-%d %H:%M")
 
-                                json_file.seek(0)
-                                _logger.info(f"writing {json_data}")
-                                json_file.write(json.dumps(json_data, indent=2))
+                        json_data = read_from_file(0)
+                        json_data[0]["EstimatedTime"] = (datetime.now() + timedelta(
+                            minutes=update_time)).strftime("%Y-%m-%d %H:%M")
+                        write_to_file(json_data, 0)
             case "r":
                 _logger.info("Received removal wish")
 
-                async with arrival_file_mutex:
-                    with open('arrival.json', 'r') as json_file:
-                        json_data = json.load(json_file)
+                json_data = read_from_file(0)
 
                 has_arrived = True
 
@@ -572,41 +570,35 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                             wake_arrival.set()
 
                         del json_data[idx]
-
-                        async with arrival_file_mutex:
-                            with open('arrival.json', 'w') as json_file:
-                                json.dump(json_data, json_file, indent=2)
-
+                        write_to_file(json_data, 0)
                         break
 
-                async with departure_file_mutex:
-                    with open('departure.json', 'r+'):
-                        json_data = json.load(json_file)
+                json_data = read_from_file(1)
 
-                        for idx, train in enumerate(json_data):
-                            if 'id' in train and train['id'] == data[2]:
-                                # wake departure function if this is the first train to depart
-                                if idx == 0:
-                                    wake_departure.set()
-                                    _logger.info("Woke departure function")
+                for idx, train in enumerate(json_data):
+                    if 'id' in train and train['id'] == data[2]:
+                        # wake departure function if this is the first train to depart
+                        if idx == 0:
+                            wake_departure.set()
+                            _logger.info("Woke departure function")
 
-                                if has_arrived:
-                                    if switch_status != data[1]:
-                                        modbus_data_queue.put(
-                                            ["P", "A train had greenlight and was allowed to leave but switch was "
-                                                  "in the wrong position"])
+                        if has_arrived:
+                            if switch_status != data[1]:
+                                modbus_data_queue.put(
+                                    ["P", "A train had greenlight and was allowed to leave but switch was "
+                                          "in the wrong position"])
 
-                                    # clear track
-                                    track_status_sim[data[1] - 1].clear()
-                                    real_track_status[data[1] - 1] = "A"
-                                    _logger.info("Cleared track")
-                                    modbus_data_queue.put(["R", data[2]])
-                                else:
-                                    modbus_data_queue.put(["B", data[2]])
+                            # clear track
+                            track_status_sim[data[1] - 1].clear()
+                            real_track_status[data[1] - 1] = "A"
+                            _logger.info("Cleared track")
+                            modbus_data_queue.put(["R", data[2]])
+                        else:
+                            modbus_data_queue.put(["B", data[2]])
 
-                                del json_data[idx]
-                                json.dump(json_data, json_file, indent=2)
-                                break
+                        del json_data[idx]
+                        write_to_file(json_data, 1)
+                        break
             case "t":
                 _logger.info("Received track status update")
 
@@ -618,20 +610,18 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                     _logger.info("Cleared track")
             case "u":
                 _logger.info("Received wish to update track for departure from simulation")
-                async with departure_file_mutex:
-                    with open("departure.json", "r+") as json_file:
-                        json_data = json.load(json_file)
 
-                        for i in range(len(json_data)):
-                            if json_data[i]["id"] == data[1]:
-                                json_data[i]["TrackAtLocation"] = data[2]
-                                modbus_data_queue.put(
-                                    ["U", json_data[i]["id"], json_data[i]['EstimatedTime'], 
-                                     json_data[i]["TrackAtLocation"]])
-                                _logger.info("updated track in departure file")
+                json_data = read_from_file(1)
 
-                        json_file.seek(0)
-                        json.dump(json_data, json_file, indent=2)
+                for i in range(len(json_data)):
+                    if json_data[i]["id"] == data[1]:
+                        json_data[i]["TrackAtLocation"] = data[2]
+                        modbus_data_queue.put(
+                            ["U", json_data[i]["id"], json_data[i]['EstimatedTime'],
+                             json_data[i]["TrackAtLocation"]])
+                        _logger.info("updated track in departure file")
+
+                write_to_file(json_data, 1)
             case "h":
                 _logger.info("Received a new train from hmi")
 
@@ -647,32 +637,24 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                 train_data = {'AdvertisedTime': arrival_time.strftime("%Y-%m-%d %H:%M"),
                               'EstimatedTime': arrival_time.strftime("%Y-%m-%d %H:%M"), 'TrackAtLocation': data[4]}
 
-                async with arrival_file_mutex:
-                    with open('arrival.json', 'r') as arrivals:
-                        arrival_data = json.load(arrivals)
+                arrival_data = read_from_file(0)
 
                 existing_times = [item['EstimatedTime'] for item in arrival_data]
                 arrival_index = bisect.bisect_left(existing_times, train_data['EstimatedTime'])
                 arrival_data.insert(arrival_index, train_data)
 
-                async with arrival_file_mutex:
-                    with open('arrival.json', 'w') as arrivals:
-                        json.dump(arrival_data, arrivals, indent=2)
+                write_to_file(arrival_data, 0)
 
                 train_data = {'AdvertisedTime': recv_time, 'EstimatedTime': recv_time, 'ToLocation': data[3],
                               'TrackAtLocation': data[4]}
 
-                async with departure_file_mutex:
-                    with open('departure.json', 'r') as departures:
-                        departure_data = json.load(departures)
+                departure_data = read_from_file(1)
 
                 existing_times = [item['EstimatedTime'] for item in departure_data]
                 departure_index = bisect.bisect_left(existing_times, train_data['EstimatedTime'])
                 departure_data.insert(departure_index, train_data)
 
-                async with departure_file_mutex:
-                    with open('departure.json', 'w') as departures:
-                        json.dump(departure_data, departures, indent=2)
+                write_to_file(departure_data, 1)
 
                 await train_match()
 
@@ -682,40 +664,42 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                 if departure_index == 0:
                     wake_departure.set()
 
-                async with arrival_file_mutex:
-                    with open('arrival.json', 'r') as arrivals:
-                        arrival_data = json.load(arrivals)
+                arrival_data = read_from_file(0)
 
                 modbus_data_queue.put(["A", arrival_data[arrival_index]['id'], recv_time, data[3], data[4]])
             case "K":
-                secret_key = data[1]
+                arrival_data = read_from_file(0)
+                departure_data = read_from_file(1)
+                departure_file_version = 0
+                arrival_file_version = 0
+
+                modbus_secret_key = data[1]
                 writer.write(data[2])
                 await writer.drain()
                 _logger.info("sent new secret key")
                 sequence_number = 0
+
+                _logger.info("updated HMAC in files")
+                write_to_file(arrival_data, 0)
+                write_to_file(departure_data, 1)
             case _:
                 data = " ".join(str(value) for value in data)
-                signature = data + secret_key.decode("utf-8")
 
                 client_verified = False
 
                 while not client_verified:
                     sequence_number += 1
-                    sha256 = hashlib.sha256()
-                    temp_signature = signature + str(sequence_number)
+                    temp_signature = data + str(sequence_number)
                     _logger.debug(temp_signature)
-                    sha256.update(temp_signature.encode("utf-8"))
-                    temp_signature = sha256.hexdigest()
+                    temp_signature = hmac.new(modbus_secret_key, temp_signature.encode(), hashlib.sha256).hexdigest()
                     nonce = [char for char in secrets.token_bytes(2)]
 
                     if sequence_number == 100:
                         _logger.info("Updating secret key")
-                        await update_keys(secret_key)
+                        await update_keys(modbus_secret_key)
 
                     data_to_send = ([sequence_number] + [len(data)] + [ord(char) for char in data] + [32] + nonce +
                                     [32] + [ord(char) for char in temp_signature])
-
-                    sha256 = hashlib.sha256()
 
                     _logger.debug("Sending data")
                     context[slave_id].setValues(func_code, address, data_to_send)
@@ -723,10 +707,10 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                     _logger.debug("Resetting flag")
                     context[slave_id].setValues(func_code, datastore_size - 2, [0])
 
-                    expected_signature = str(nonce) + secret_key.decode("utf-8")
+                    expected_signature = hmac.new(modbus_secret_key, str(nonce).encode(), hashlib.sha256).hexdigest()
+
                     _logger.debug(f"nonce {str(nonce)}")
-                    sha256.update(expected_signature.encode("utf-8"))
-                    expected_signature = [ord(char) for char in sha256.hexdigest()]
+                    expected_signature = [ord(char) for char in expected_signature]
                     _logger.debug(f"Expecting: {expected_signature}")
 
                     while context[slave_id].getValues(func_code, datastore_size - 2, 1) == [0]:
@@ -754,14 +738,8 @@ def modbus_helper() -> None:
 async def departure() -> None:
     """Simulates control for departing trains from the train station.
     Tries to acquire the switch so it is at the correct track and then remove the train from the list."""
-
     while True:
-        try:
-            async with departure_file_mutex:
-                with open('departure.json', 'r') as json_file:
-                    json_data = json.load(json_file)
-        except (FileNotFoundError, json.JSONDecodeError):
-            _logger.error("Cannot find or decode file")
+        json_data = read_from_file(1)
 
         if json_data:
             # Extract information from the first entry in the json_data list
@@ -791,12 +769,7 @@ async def departure() -> None:
                 _logger.debug("Function has been woken")
                 continue
 
-            try:
-                async with departure_file_mutex:
-                    with open('departure.json', 'r') as json_file:
-                        json_data = json.load(json_file)
-            except (FileNotFoundError, json.JSONDecodeError):
-                _logger.error("Cannot find or decode file")
+            json_data = read_from_file(1)
 
             if json_data:
                 # Retrieve the updated first entry after waiting for the departure event
@@ -820,9 +793,7 @@ async def departure() -> None:
                     json_data.pop(0)
 
                     # Update the 'departure.json' file with the modified json_data
-                    async with departure_file_mutex:
-                        with open('departure.json', 'w') as json_file:
-                            json_file.write(json.dumps(json_data, indent=2))
+                    write_to_file(json_data, 1)
                 else:
                     # Otherwise wait until the updated estimated time to leave
                     difference = updated_estimated_time - datetime.now()
@@ -839,9 +810,7 @@ async def departure() -> None:
                     json_data.pop(0)
 
                     # Update the 'departure.json' file with the modified json_data
-                    async with departure_file_mutex:
-                        with open('departure.json', 'w') as json_file:
-                            json_file.write(json.dumps(json_data, indent=2))
+                    write_to_file(json_data, 1)
         else:
             _logger.error("No entry found in departure.json")
 
@@ -850,15 +819,10 @@ async def departure() -> None:
 
 
 async def arrival() -> None:
+    """Simulates control for arriving trains to the train station.
+    Tries to acquire the switch so it is at the correct track and then notifies gui when it has arrived"""
     while True:
-        try:
-            # Attempt to read data from the 'arrival.json' file
-            async with arrival_file_mutex:
-                with open('arrival.json', 'r') as json_file:
-                    json_data = json.load(json_file)
-        except (FileNotFoundError, json.JSONDecodeError):
-            # Handle file not found or JSON decoding errors and log an error message
-            _logger.error("Error reading arrival.json file.")
+        json_data = read_from_file(0)
 
         if json_data:
             # Extract information from the first entry in the JSON data
@@ -932,14 +896,7 @@ async def arrival() -> None:
             _logger.info("Clear to arrive")
             arrival_event.clear()
 
-            try:
-                # Read the updated data from 'arrival.json'
-                async with arrival_file_mutex:
-                    with open('arrival.json', 'r') as json_file:
-                        json_data = json.load(json_file)
-            except (FileNotFoundError, json.JSONDecodeError):
-                # Handle file not found or JSON decoding errors and log an error message
-                _logger.error("Error reading arrival.json file.")
+            json_data = read_from_file(0)
 
             if json_data:
                 # Extract information from the updated first entry in the JSON data
@@ -958,23 +915,16 @@ async def arrival() -> None:
                 # Send an update that the train has now arrived
                 modbus_data_queue.put(["a", track_number])
 
-                try:
-                    # Read the updated data from 'arrival.json'
-                    async with arrival_file_mutex:
-                        with open('arrival.json', 'w') as json_file:
-                            json_data.pop(0)
-                            json_data = json.load(json_file)
-                            json.dump(json_data, json_file, indent=2)
-                except (FileNotFoundError, json.JSONDecodeError):
-                    # Handle file not found or JSON decoding errors and log an error message
-                    _logger.error("Error reading arrival.json file.")
+                # remove train from pending arrivals
+                json_data.pop(0)
+                write_to_file(json_data, 0)
 
                 # sleep 0.5 seconds so we can send data to the gui so it will show that the train has arrived
                 await asyncio.sleep(0.5)
 
 
 async def acquire_switch(switch_queue: asyncio.Queue) -> None:
-    """Empties the switch queue and keeps track of when the switch will be available, 
+    """Empties the switch queue and keeps track of when the switch will be available,
     then notifies the correct function."""
 
     global switch_status
@@ -1042,13 +992,7 @@ async def update_arrival() -> None:
 
         return updated_data
 
-    try:
-        async with arrival_file_mutex:
-            with open('arrival.json', 'r') as json_file:
-                existing_data = json.load(json_file)
-    except (FileNotFoundError, json.JSONDecodeError):
-        _logger.warning("update_arrival: found no prior arrival file")
-        existing_data = []
+    existing_data = read_from_file(0)
 
     new_api_response = requests.post('https://api.trafikinfo.trafikverket.se/v2/data.json', data=xml_arrival,
                                      headers=headers).content
@@ -1083,9 +1027,7 @@ async def update_arrival() -> None:
         updated_data = update_existing_data(new_formatted_data)
 
         # Save updated data to the JSON file
-        async with arrival_file_mutex:
-            with open('arrival.json', 'w') as json_file:
-                json.dump(updated_data, json_file, indent=2)
+        write_to_file(updated_data, 0)
 
         _logger.info("Updated values in arrival.json")
     else:
@@ -1140,12 +1082,7 @@ async def update_departure() -> None:
         return updated_data
 
     # Load existing data from the previous JSON file or create an empty list if the file doesn't exist
-    try:
-        async with departure_file_mutex:
-            with open('departure.json', 'r') as json_file:
-                existing_data = json.load(json_file)
-    except (FileNotFoundError, json.JSONDecodeError):
-        existing_data = []
+    existing_data = read_from_file(1)
 
     new_api_response = requests.post('https://api.trafikinfo.trafikverket.se/v2/data.json', data=xml_departure,
                                      headers=headers).content
@@ -1166,7 +1103,7 @@ async def update_departure() -> None:
                 new_train_info.get('EstimatedTimeAtLocation', new_train_info['AdvertisedTimeAtLocation']),
                 "%Y-%m-%dT%H:%M:%S.%f%z").strftime("%Y-%m-%d %H:%M")
 
-            to_location = "Köpenhamn" if any(location.get('LocationName') == 'Dk.kh' for location in 
+            to_location = "Köpenhamn" if any(location.get('LocationName') == 'Dk.kh' for location in
                                              new_train_info.get("ToLocation", [])) else "Emmaboda"
 
             if new_train_info['TrackAtLocation'] != "-":
@@ -1183,9 +1120,7 @@ async def update_departure() -> None:
         updated_data = update_existing_data(new_formatted_data)
 
         # Save updated data to the JSON file
-        async with departure_file_mutex:
-            with open('departure.json', 'w') as json_file:
-                json.dump(updated_data, json_file, indent=2)
+        write_to_file(updated_data, 1)
 
         _logger.info("Data has been updated in departure.json")
     else:
@@ -1205,16 +1140,15 @@ async def update_keys(secret_key: bytes) -> None:
 async def train_match() -> None:
     """compares arrivals against departures and gives train ids based on the arrival.json list"""
     timeformat = '%Y:%m:%d:%H:%M'
-    with open('departure.json', 'r') as departures:
-        departure_data = json.load(departures)
-    with open('arrival.json', 'r') as arrivals:
-        arrival_data = json.load(arrivals)
+
+    departure_data = read_from_file(1)
+    arrival_data = read_from_file(0)
     idcounter = 1
 
     # creates one bestmatch which contains the departure train that needs to be updated
     bestmatch = departure_data[0]
     timedelta0 = timedelta(hours=0)
-    
+
     for atrain in arrival_data:
         # if the train doesnt have an id
         if len(atrain) == 3:
@@ -1244,11 +1178,98 @@ async def train_match() -> None:
         bestmatch['id'] = str(idcounter)
         idcounter += 1
 
-    with open('departure.json', 'w') as departures:
-        json.dump(departure_data, departures, indent=2)
+    write_to_file(departure_data, 1)
+    write_to_file(arrival_data, 0)
 
-    with open('arrival.json', 'w') as arrivals:
-        json.dump(arrival_data, arrivals, indent=2)
+
+def write_to_file(data: Union[dict, List], file_nr: int) -> None:
+    """Calculates hmac for the data and writes it the specified file. 0 for arrival, 1 for departure"""
+    global modbus_secret_key
+    global arrival_file_version
+    global departure_file_version
+
+    json_data = json.dumps(data, indent=2)
+
+    if file_nr == 0:
+        json_data = f"{json_data}\nfileVersion={arrival_file_version}"
+
+        # Calculate HMAC using HMAC-SHA-256
+        hmac_value = hmac.new(modbus_secret_key, json_data.encode(), hashlib.sha256).hexdigest()
+
+        content = f"{json_data}\nHMAC={hmac_value}"
+
+        # Write content to the file
+        async with arrival_file_mutex:
+            with open("arrival.json", 'w') as file:
+                file.write(content)
+
+        arrival_file_version += 1
+    else:
+        json_data = f"{json_data}\nfileVersion={departure_file_version}"
+
+        # Calculate HMAC using HMAC-SHA-256
+        hmac_value = hmac.new(modbus_secret_key, json_data.encode(), hashlib.sha256).hexdigest()
+
+        content = f"{json_data}\nHMAC={hmac_value}"
+
+        # Write content to the file
+        async with departure_file_mutex:
+            with open("departure.json", 'w') as file:
+                file.write(content)
+
+        departure_file_version += 1
+
+
+async def read_from_file(file_nr: int) -> Union[dict, List]:
+    """Reads data from specified file and calculates hmac and compare to the one in the file. 0 for arrival,
+    1 for departure"""
+    global modbus_secret_key
+    global arrival_file_version
+    global departure_file_version
+
+    if file_nr == 0:
+        try:
+            async with arrival_file_mutex:
+                with open("arrival.json", 'r') as file:
+                    content = file.read()
+        except (FileNotFoundError, json.JSONDecodeError):
+            _logger.error("Cannot find or decode file")
+            return []
+
+        parts = content.rsplit("HMAC=", 1)
+        json_data, file_version = parts[0].rsplit("fileVersion=", 1)
+
+        # Calculate HMAC from JSON data and sequence number
+        recalculated_hmac = hmac.new(modbus_secret_key, parts[0].strip().encode(), hashlib.sha256).hexdigest()
+
+        if recalculated_hmac == parts[1] and int(file_version) == arrival_file_version - 1:
+            # HMAC verification successful
+            return json.loads(json_data)
+        else:
+            # HMAC verification failed or sequence number is incorrect
+            _logger.critical("Failed integrity check")
+            raise ValueError("Integrity check failed")
+    else:
+        try:
+            async with departure_file_mutex:
+                with open("departure.json", 'r') as file:
+                    content = file.read()
+        except (FileNotFoundError, json.JSONDecodeError):
+            _logger.error("Cannot find or decode file")
+
+        parts = content.rsplit("HMAC=", 1)
+        json_data, file_version = parts[0].rsplit("fileVersion=", 1)
+
+        # Calculate HMAC from JSON data and sequence number
+        recalculated_hmac = hmac.new(modbus_secret_key, parts[0].strip().encode(), hashlib.sha256).hexdigest()
+
+        if recalculated_hmac == parts[1] and int(file_version) == departure_file_version - 1:
+            # HMAC verification successful
+            return json.loads(json_data)
+        else:
+            # HMAC verification failed or sequence number is incorrect
+            _logger.critical("Failed integrity check")
+            raise ValueError("Integrity check failed")
 
 
 if __name__ == '__main__':
@@ -1259,4 +1280,3 @@ if __name__ == '__main__':
     SQL.closeSession()
 
     modbus_process.join()
-    
