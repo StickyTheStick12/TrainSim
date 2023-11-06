@@ -1,3 +1,4 @@
+import hashlib
 from cryptography.fernet import Fernet
 
 import customtkinter as ctk
@@ -8,8 +9,7 @@ from pymodbus.exceptions import ModbusException
 import asyncio
 import logging
 import multiprocessing
-import hmac
-import hashlib
+import configparser
 
 logging.basicConfig()
 _logger = logging.getLogger(__file__)
@@ -148,7 +148,9 @@ def modbus_client_thread() -> None:
     client = None
     loop = asyncio.new_event_loop()
 
-    secret_key = b'gf8VdJD8W4Z8t36FuUPHI1A_V2ysBZQkBS8Tmy83L44='
+    config = configparser.ConfigParser()
+    config.read('config.ini')
+    secret_key = config.get('Credentials', 'MODBUS_DATA_KEY').encode()
     highest_data_id = 0
 
     async def run_client() -> None:
@@ -199,8 +201,10 @@ def modbus_client_thread() -> None:
                         received_data = "".join(chr(char) for char in hold_register.registers[2:2 + amount_to_read + 1
                                                                                                 + 2 + 1 + 64])
 
-                        nonce = received_data[1 + amount_to_read:1 + amount_to_read + 2]
-                        signature = received_data[1 + amount_to_read + 3:]
+                        nonce = received_data[1 + amount_to_read:1 + amount_to_read+2]
+
+                        signature = received_data[1+amount_to_read+3:]
+
                         data = received_data[:amount_to_read].split(" ")
 
                         if not data_id > highest_data_id:
@@ -209,17 +213,18 @@ def modbus_client_thread() -> None:
                         highest_data_id = data_id
 
                         # verify signature
-                        calc_signature = " ".join(str(value) for value in data) + str(data_id)
-                        _logger.info(f"calcualting signature for this {calc_signature}")
-                        calc_signature = hmac.new(secret_key, calc_signature.encode(), hashlib.sha256).hexdigest()
+                        sha256 = hashlib.sha256()
+                        calc_signature = " ".join(str(value) for value in data) + secret_key.decode("utf-8") + str(data_id)
+                        sha256.update(calc_signature.encode("utf-8"))
+                        calc_signature = sha256.hexdigest()
 
                         if signature == calc_signature:
                             # calculate new signature for nonce
                             nonce = [ord(char) for char in nonce]
-                            calc_signature = hmac.new(secret_key, str(nonce).encode(), hashlib.sha256).hexdigest()
-
-                            calc_signature = [ord(char) for char in calc_signature]
-                            _logger.info(calc_signature)
+                            sha256 = hashlib.sha256()
+                            calc_signature = str(nonce) + secret_key.decode("utf-8")
+                            sha256.update(calc_signature.encode("utf-8"))
+                            calc_signature = [ord(char) for char in sha256.hexdigest()]
                             for i in range(len(calc_signature)):
                                 await client.write_register(i, calc_signature[i], slave=1)
 
@@ -242,7 +247,7 @@ def modbus_client_thread() -> None:
 
     async def receive_key() -> None:
         async def handle_client(reader: asyncio.StreamReader,
-                                writer: asyncio.StreamWriter) -> None:
+                            writer: asyncio.StreamWriter) -> None:
             nonlocal secret_key
             nonlocal highest_data_id
             data = await reader.read(1024)
