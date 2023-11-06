@@ -33,7 +33,6 @@ from cryptography.fernet import Fernet
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(funcName)s - %(message)s', level=logging.INFO)
 _logger = logging.getLogger(__file__)
 
-
 # Modbus variables
 datastore_size = 124  # cant be bigger than 125
 modbus_port = 12345
@@ -237,7 +236,7 @@ def railwayPage():
                         json_data['currentTrackStatus']['3'] = track_status[0]
                         logData(json_data, "Track status changed", "Track 3 changed from Occupied to Available")
 
-                    data = ["t", 2, json_data['currentTrackStatus']['3'][0]]
+                    data = ["t", 3, json_data['currentTrackStatus']['3'][0]]
                     modbus_data_queue.put(data)
 
                 case "track4":
@@ -248,7 +247,7 @@ def railwayPage():
                         json_data['currentTrackStatus']['4'] = track_status[0]
                         logData(json_data, "Track status changed", "Track 4 changed from Occupied to Available")
 
-                    data = ["t", 2, json_data['currentTrackStatus']['4'][0]]
+                    data = ["t", 4, json_data['currentTrackStatus']['4'][0]]
                     modbus_data_queue.put(data)
 
                 case "track5":
@@ -259,7 +258,7 @@ def railwayPage():
                         json_data['currentTrackStatus']['5'] = track_status[0]
                         logData(json_data, "Track status changed", "Track 5 changed from Occupied to Available")
 
-                    data = ["t", 2, json_data['currentTrackStatus']['5'][0]]
+                    data = ["t", 5, json_data['currentTrackStatus']['5'][0]]
                     modbus_data_queue.put(data)
 
                 case "track6":
@@ -270,7 +269,7 @@ def railwayPage():
                         json_data['currentTrackStatus']['6'] = track_status[0]
                         logData(json_data, "Track status changed", "Track 6 changed from Occupied to Available")
 
-                    data = ["t", 2, json_data['currentTrackStatus']['6'][0]]
+                    data = ["t", 6, json_data['currentTrackStatus']['6'][0]]
                     modbus_data_queue.put(data)
 
         else:
@@ -425,6 +424,8 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
     arrival_data = await read_from_file(0)
 
     max_arrival_id = max([int(atrain.get('id', 0)) for atrain in arrival_data], default=0)
+
+    success = False
 
     _logger.info("Finding tracks where a train already has arrived to")
     for d_train in departure_data:
@@ -630,10 +631,12 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
 
                 if data[2] == "O":
                     track_status_sim[data[1] - 1].set()
+                    await departure_to_data()
                     _logger.info("Occupied track")
                     modbus_data_queue.put(["T", data[1], "O"])
                 else:
                     track_status_sim[data[1] - 1].clear()
+                    await departure_to_data()
                     _logger.info("Cleared track")
                     modbus_data_queue.put(["T", data[1], "A"])
 
