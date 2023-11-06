@@ -214,7 +214,7 @@ def railwayPage():
                         json_data['currentTrackStatus']['1'] = track_status[0]
                         logData(json_data, "Track status changed", "Track 1 changed from Occupied to Available")
 
-                    data = ["T", 1, json_data['currentTrackStatus']['1']]
+                    data = ["t", 1, json_data['currentTrackStatus']['1'][0]]
                     modbus_data_queue.put(data)
 
                 case "track2":
@@ -225,7 +225,7 @@ def railwayPage():
                         json_data['currentTrackStatus']['2'] = track_status[0]
                         logData(json_data, "Track status changed", "Track 2 changed from Occupied to Available")
 
-                    data = ["T", 2, json_data['currentTrackStatus']['2']]
+                    data = ["t", 2, json_data['currentTrackStatus']['2'][0]]
                     modbus_data_queue.put(data)
 
                 case "track3":
@@ -236,7 +236,7 @@ def railwayPage():
                         json_data['currentTrackStatus']['3'] = track_status[0]
                         logData(json_data, "Track status changed", "Track 3 changed from Occupied to Available")
 
-                    data = ["T", 2, json_data['currentTrackStatus']['3']]
+                    data = ["t", 2, json_data['currentTrackStatus']['3'][0]]
                     modbus_data_queue.put(data)
 
                 case "track4":
@@ -247,7 +247,7 @@ def railwayPage():
                         json_data['currentTrackStatus']['4'] = track_status[0]
                         logData(json_data, "Track status changed", "Track 4 changed from Occupied to Available")
 
-                    data = ["T", 2, json_data['currentTrackStatus']['4']]
+                    data = ["t", 2, json_data['currentTrackStatus']['4'][0]]
                     modbus_data_queue.put(data)
 
                 case "track5":
@@ -258,7 +258,7 @@ def railwayPage():
                         json_data['currentTrackStatus']['5'] = track_status[0]
                         logData(json_data, "Track status changed", "Track 5 changed from Occupied to Available")
 
-                    data = ["T", 2, json_data['currentTrackStatus']['5']]
+                    data = ["t", 2, json_data['currentTrackStatus']['5'][0]]
                     modbus_data_queue.put(data)
 
                 case "track6":
@@ -269,7 +269,7 @@ def railwayPage():
                         json_data['currentTrackStatus']['6'] = track_status[0]
                         logData(json_data, "Track status changed", "Track 6 changed from Occupied to Available")
 
-                    data = ["T", 2, json_data['currentTrackStatus']['6']]
+                    data = ["t", 2, json_data['currentTrackStatus']['6'][0]]
                     modbus_data_queue.put(data)
 
         else:
@@ -280,7 +280,7 @@ def railwayPage():
                 json_data['switchStatus'] = "Track " + button_clicked
                 json_data = logData(json_data, "Changed Switch Connection",
                                     f"Switch connection changed from {tempSwitchData} to {json_data['switchStatus']}")
-                data = ["S", button_clicked]
+                data = ["s", 2, button_clicked]
                 modbus_data_queue.put(data)
 
         writeToJson('data.json', json_data)
@@ -618,6 +618,7 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
 
                         del json_data[idx]
                         await write_to_file(json_data, 1)
+                        await departure_to_data()
                         break
             case "t":
                 _logger.info("Received track status update")
@@ -675,6 +676,7 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                 departure_data.insert(departure_index, train_data)
 
                 await write_to_file(departure_data, 1)
+                await departure_to_data()
 
                 await train_match()
 
@@ -815,6 +817,7 @@ async def departure() -> None:
 
                     # Update the 'departure.json' file with the modified json_data
                     await write_to_file(json_data, 1)
+                    await departure_to_data()
                 else:
                     # Otherwise wait until the updated estimated time to leave
                     difference = updated_estimated_time - datetime.now()
@@ -832,6 +835,7 @@ async def departure() -> None:
 
                     # Update the 'departure.json' file with the modified json_data
                     await write_to_file(json_data, 1)
+                    await departure_to_data()
         else:
             _logger.error("No entry found in departure.json")
 
@@ -970,7 +974,9 @@ async def acquire_switch(switch_queue: asyncio.Queue) -> None:
 
         # Send an update message to the GUI
         modbus_data_queue.put(["S", str(switch_status)])
-
+        
+        await departure_to_data()
+        
         # give the train 60 seconds to arrive/depart
         await asyncio.sleep(60)
 
@@ -1176,6 +1182,7 @@ async def update_departure() -> None:
 
             # Save updated data to the JSON file
             await write_to_file(updated_data, 1)
+            await departure_to_data()
 
             _logger.info("Data has been updated in departure.json")
         else:
@@ -1328,16 +1335,16 @@ async def read_from_file(file_nr: int) -> Union[dict, List]:
             raise ValueError("Integrity check failed")
 
 
-async def departure_to_data():
+async def departure_to_data():    
     departure_data = await read_from_file(1)
-
-    _logger.info("Got file")
 
     with open('data.json', 'r') as datafile:
         data = json.load(datafile)
 
     for i in range(1, 7):
         data['currentTrackStatus'][str(i)] = data['trackStatus'][track_status_sim[i - 1].is_set()]
+
+    data['switchStatus'] = "Track " + str(switch_status)
 
     # deletes data in data['trains']
     if len(data['trains']) == 0:
@@ -1355,8 +1362,6 @@ async def departure_to_data():
 
     with open('data.json', 'w') as datafile:
         json.dump(data, datafile, indent=3)
-
-    _logger.info("written file")
 
 
 async def send_new_entry() -> None:
