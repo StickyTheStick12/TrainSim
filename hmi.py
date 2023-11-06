@@ -16,6 +16,7 @@ import secrets
 import os
 import hmac
 from typing import Union, List
+import configparser
 
 from pymodbus import __version__ as pymodbus_version
 from pymodbus.datastore import (
@@ -28,6 +29,7 @@ from pymodbus.transaction import ModbusTlsFramer
 from pymodbus.server import StartAsyncTlsServer
 
 from cryptography.fernet import Fernet
+
 
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(funcName)s - %(message)s', level=logging.INFO)
 _logger = logging.getLogger(__file__)
@@ -49,8 +51,6 @@ arrival_event = asyncio.Event()
 
 wake_arrival = asyncio.Event()
 wake_departure = asyncio.Event()
-
-removed_train = asyncio.Event() # todo remove
 
 track1 = asyncio.Event()
 track2 = asyncio.Event()
@@ -79,11 +79,17 @@ app.secret_key = b'_5#y2L"F4Q8z\n\xec]/'
 login_manager = LoginManager()
 login_manager.init_app(app)
 
-
 departure_file_version = 0
 arrival_file_version = 0
 
-modbus_secret_key = b'gf8VdJD8W4Z8t36FuUPHI1A_V2ysBZQkBS8Tmy83L44='
+config = configparser.ConfigParser()
+config.read('config.ini')
+
+modbus_secret_key = config.get('Credentials', 'MODBUS_DATA_KEY').encode()
+file_secret_key = Fernet.generate_key()
+
+# put update tasks in a while loop
+
 
 class Users(UserMixin):
     def __init__(self, username, password, is_active=True):
@@ -385,6 +391,7 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
     global modbus_secret_key
     global arrival_file_version
     global departure_file_version
+    global file_secret_key
 
     loop = asyncio.get_event_loop()
     switch_queue = asyncio.Queue()
@@ -674,7 +681,8 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                 arrival_file_version = 0
 
                 modbus_secret_key = data[1]
-                writer.write(data[2])
+                file_secret_key = data[2]
+                writer.write(data[3])
                 await writer.drain()
                 _logger.info("sent new secret key")
                 sequence_number = 0
@@ -1130,11 +1138,12 @@ async def update_departure() -> None:
 
 
 async def update_keys(secret_key: bytes) -> None:
-    new_key = Fernet.generate_key()
+    new_modbus_key = Fernet.generate_key()
+    new_file_key = Fernet.generate_key()
     cipher = Fernet(secret_key)
-    encrypted_message = cipher.encrypt(new_key)
+    encrypted_message = cipher.encrypt(new_modbus_key)
 
-    modbus_data_queue.put(["K", new_key, encrypted_message])
+    modbus_data_queue.put(["K", new_modbus_key, new_file_key, encrypted_message])
 
 
 async def train_match() -> None:
@@ -1184,7 +1193,6 @@ async def train_match() -> None:
 
 def write_to_file(data: Union[dict, List], file_nr: int) -> None:
     """Calculates hmac for the data and writes it the specified file. 0 for arrival, 1 for departure"""
-    global modbus_secret_key
     global arrival_file_version
     global departure_file_version
 
@@ -1194,7 +1202,7 @@ def write_to_file(data: Union[dict, List], file_nr: int) -> None:
         json_data = f"{json_data}\nfileVersion={arrival_file_version}"
 
         # Calculate HMAC using HMAC-SHA-256
-        hmac_value = hmac.new(modbus_secret_key, json_data.encode(), hashlib.sha256).hexdigest()
+        hmac_value = hmac.new(file_secret_key, json_data.encode(), hashlib.sha256).hexdigest()
 
         content = f"{json_data}\nHMAC={hmac_value}"
 
@@ -1208,7 +1216,7 @@ def write_to_file(data: Union[dict, List], file_nr: int) -> None:
         json_data = f"{json_data}\nfileVersion={departure_file_version}"
 
         # Calculate HMAC using HMAC-SHA-256
-        hmac_value = hmac.new(modbus_secret_key, json_data.encode(), hashlib.sha256).hexdigest()
+        hmac_value = hmac.new(file_secret_key, json_data.encode(), hashlib.sha256).hexdigest()
 
         content = f"{json_data}\nHMAC={hmac_value}"
 
@@ -1223,7 +1231,6 @@ def write_to_file(data: Union[dict, List], file_nr: int) -> None:
 async def read_from_file(file_nr: int) -> Union[dict, List]:
     """Reads data from specified file and calculates hmac and compare to the one in the file. 0 for arrival,
     1 for departure"""
-    global modbus_secret_key
     global arrival_file_version
     global departure_file_version
 
@@ -1240,7 +1247,7 @@ async def read_from_file(file_nr: int) -> Union[dict, List]:
         json_data, file_version = parts[0].rsplit("fileVersion=", 1)
 
         # Calculate HMAC from JSON data and sequence number
-        recalculated_hmac = hmac.new(modbus_secret_key, parts[0].strip().encode(), hashlib.sha256).hexdigest()
+        recalculated_hmac = hmac.new(file_secret_key, parts[0].strip().encode(), hashlib.sha256).hexdigest()
 
         if recalculated_hmac == parts[1] and int(file_version) == arrival_file_version - 1:
             # HMAC verification successful
@@ -1261,7 +1268,7 @@ async def read_from_file(file_nr: int) -> Union[dict, List]:
         json_data, file_version = parts[0].rsplit("fileVersion=", 1)
 
         # Calculate HMAC from JSON data and sequence number
-        recalculated_hmac = hmac.new(modbus_secret_key, parts[0].strip().encode(), hashlib.sha256).hexdigest()
+        recalculated_hmac = hmac.new(file_secret_key, parts[0].strip().encode(), hashlib.sha256).hexdigest()
 
         if recalculated_hmac == parts[1] and int(file_version) == departure_file_version - 1:
             # HMAC verification successful
