@@ -523,7 +523,7 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
         # Packet: ["H", "track"]
 
         # B: Remove a train from the timetable. Only send if train hasn't arrived yet.
-        # Packet: ["B", "id"]
+        # Packet: ["B", "index"]
 
         # C: populates the train station at the beginning if a train already exists there
         # Packet: ["C", "track"]
@@ -535,7 +535,7 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                 if real_track_status[switch_status - 1] == "O":
                     # we have a crash since we tried to drive into an already occupied track
                     #modbus_data_queue.put(["P", "A train collided while trying to drive into the station"])
-                    logger.error("Problem")
+                    _logger.error("Problem")
                 else:
                     real_track_status[switch_status - 1] = "O"
 
@@ -556,7 +556,7 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                     await switch_queue.put(data[1:])
 
                     difference = max((last_acquired_switch - datetime.now()).total_seconds(), 0)
-                    update_time = (3 * 60 * switch_queue.qsize() + difference) // 60  # Convert to minutes
+                    update_time = (2 * 60 * switch_queue.qsize() + 60 * (switch_queue.qsize() - 1)) + difference) // 60
 
                     if data[1] == 0:
                         _logger.info("Received switch update from departure function")
