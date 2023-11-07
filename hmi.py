@@ -556,7 +556,7 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                     await switch_queue.put(data[1:])
 
                     difference = max((last_acquired_switch - datetime.now()).total_seconds(), 0)
-                    update_time = (2 * 60 * switch_queue.qsize() + 60 * (switch_queue.qsize() - 1)) + difference) // 60
+                    update_time = (2 * 60 * switch_queue.qsize() + 60 * (switch_queue.qsize() - 1) + difference) // 60
 
                     if data[1] == 0:
                         _logger.info("Received switch update from departure function")
