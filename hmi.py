@@ -582,7 +582,7 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
 
                 entries_in_gui -= 1
 
-                if entries_in_gui < 11:
+                if entries_in_gui < 8:
                     send_data.set()
 
                 json_data = await read_from_file(0)
@@ -760,8 +760,8 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                     _logger.debug(f"Expecting: {expected_signature}")
 
                     while context[slave_id].getValues(func_code, datastore_size - 2, 1) == [0]:
-                        _logger.info("Waiting for client to copy datastore; sleeping 2 second")
-                        await asyncio.sleep(2)  # give the server control so it can answer the client
+                        _logger.info("Waiting for client to copy datastore; sleeping 1 second")
+                        await asyncio.sleep(1)  # give the server control so it can answer the client
 
                     if context[slave_id].getValues(func_code, 0, 64) == expected_signature:
                         _logger.info("Client is verified")
@@ -1406,7 +1406,7 @@ async def send_new_entry() -> None:
 
         entries_in_gui += 1
 
-        if entries_in_gui == 11:
+        if entries_in_gui == 9:
             send_data.clear()
 
 
