@@ -30,7 +30,7 @@ from pymodbus.server import StartAsyncTlsServer
 
 from cryptography.fernet import Fernet
 
-logging.basicConfig(format='%(asctime)s - %(levelname)s - %(funcName)s - %(message)s', level=logging.INFO)
+logging.basicConfig(format='%(asctime)s - %(levelname)s - %(funcName)s - %(message)s', level=logging.ERROR)
 _logger = logging.getLogger(__file__)
 
 # Modbus variables
@@ -175,7 +175,7 @@ def timetablePage(change=None):
                         json_data = logData(json_data, "Deleted entry in timetable",
                                             f"Train {json_data['trains'][id - 1]['trainNumber']} was deleted")
                         json_data['trains'].pop(id - 1)
-                        data = ["R"] + [id - 1]
+                        data = ["g"] + [id - 1]
                         modbus_data_queue.put(data)
 
         writeToJson('data.json', json_data)
@@ -486,6 +486,9 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
         # h: inserts a new time in the json files
         # Packet ["h", "AdvertisedTimeArrival", "AdvertisedTimeDeparture", "ToLocation", Track]
 
+        # g: hmi call to remove an entry
+        # Packet ["g", "idx"]
+
         # ----------------- SIMULATION ----------------- #
         # a: A "status" message that a train has arrived at the station. Updates the real track status. Attack helper.
         # Packet: ["a", id, track]
@@ -568,7 +571,7 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
 
                         await write_to_file(json_data, 1)
 
-                        modbus_data_queue.put(["U", json_data[0]['id'], json_data[0]['EstimatedTime'],
+                        modbus_data_queue.put(["U", "0", json_data[0]['EstimatedTime'],
                                                json_data[0]['TrackAtLocation']])
                     else:
                         _logger.info("Received switch update from arrival function")
@@ -582,7 +585,7 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
 
                 entries_in_gui -= 1
 
-                if entries_in_gui < 8:
+                if entries_in_gui < 5:
                     send_data.set()
 
                 json_data = await read_from_file(0)
@@ -590,8 +593,7 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                 has_arrived = True
 
                 for idx, train in enumerate(json_data):
-                    if train['id'] == data[2]:
-                        _logger.info(train['id'])
+                    if 'id' in train and train['id'] == str(data[2]):
                         has_arrived = False
                         _logger.info("Train hasn't arrived yet")
                         if idx == 0:
@@ -604,7 +606,7 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                 json_data = await read_from_file(1)
 
                 for idx, train in enumerate(json_data):
-                    if train['id'] == data[2]:
+                    if 'id' in train and train['id'] == str(data[2]):
                         # wake departure function if this is the first train to depart
                         if idx == 0:
                             wake_departure.set()
@@ -618,7 +620,7 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                             track_status_sim[data[1] - 1].clear()
                             real_track_status[data[1] - 1] = "A"
                             _logger.info("Cleared track")
-                            modbus_data_queue.put(["R", str(idx)])
+                            modbus_data_queue.put(["R", train['TrackAtLocation'], str(idx)])
                         else:
                             modbus_data_queue.put(["B", str(idx)])
 
@@ -626,6 +628,8 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                         await write_to_file(json_data, 1)
                         await departure_to_data()
                         break
+
+                _logger.info(data[2])
             case "t":
                 _logger.info("Received track status update")
 
@@ -650,7 +654,7 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                     if json_data[i]["id"] == data[1]:
                         json_data[i]["TrackAtLocation"] = data[2]
                         modbus_data_queue.put(
-                            ["U", json_data[i]["id"], json_data[i]['EstimatedTime'],
+                            ["U", str(i), json_data[i]['EstimatedTime'],
                              json_data[i]["TrackAtLocation"]])
                         _logger.info("updated track in departure file")
 
@@ -712,6 +716,14 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
 
                 if departure_index == 0:
                     wake_departure.set()
+
+                if departure_index < 4:
+                    modbus_data_queue.put(
+                        ['A', str(departure_index), departure_data[departure_index]['EstimatedTime'],
+                         departure_data[departure_index]['ToLocation'],
+                         departure_data[departure_index]['TrackAtLocation']])
+                    entries_in_gui += 1
+                    await departure_to_data()
             case "K":
                 arrival_data = await read_from_file(0)
                 departure_data = await read_from_file(1)
@@ -728,6 +740,9 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                 _logger.info("updated HMAC in files")
                 await write_to_file(arrival_data, 0)
                 await write_to_file(departure_data, 1)
+            case "g":
+                json_data = await read_from_file(1)
+                modbus_data_queue.put(['r', int(json_data[data[1]]['TrackAtLocation']), json_data[data[1]]['id']])
             case _:
                 data = " ".join(str(value) for value in data)
 
@@ -912,7 +927,7 @@ async def arrival() -> None:
                         modbus_data_queue.put(["s", 1, str(track_number)])
 
                         # Update the track information in departure
-                        modbus_data_queue.put(["U", first_entry['id'], str(track_number)])
+                        modbus_data_queue.put(["U", "0", str(track_number)])
                         break
 
                     # await the departure of a train to be able to get a track
@@ -938,7 +953,7 @@ async def arrival() -> None:
                             modbus_data_queue.put(["s", 1, str(track_number)])
 
                             # Update the track information in depafirture
-                            modbus_data_queue.put(["U", first_entry['AdvertisedTime'], str(track_number)])
+                            modbus_data_queue.put(["U", "0", str(track_number)])
                             break
 
             # Wait for the arrival event
@@ -1152,7 +1167,7 @@ async def update_departure() -> None:
                     existing_train['EstimatedTime'] = corresponding_entry['EstimatedTime']
 
                     if idx < 11:
-                        modbus_data_queue.put["U", existing_train['id'], existing_train['EstimatedTime'],
+                        modbus_data_queue.put["U", str(idx), existing_train['EstimatedTime'],
                         existing_train['TrackAtLocation']]
 
                     # Packet ["U", "id", EstimatedTime, "track"]
@@ -1247,7 +1262,6 @@ async def train_match() -> None:
             formatted_str = atrain['AdvertisedTime'].replace('-', ' ').replace(' ', ':')
             atraintime = datetime.strptime(formatted_str, timeformat)
             for dtrain in departure_data:
-
                 # if the dtrain is on the same track as the atrain and it doesnt have an id
                 if dtrain['TrackAtLocation'] == atrain['TrackAtLocation'] and len(dtrain) == 4:
 
@@ -1380,12 +1394,11 @@ async def departure_to_data():
         data['trains'] = [data['trains'][0]]
 
     # creates new train and then gives it data based on departure file
-    for i in range(len(departure_data)):
+    for i in range(min(len(departure_data), 4)):
         data['trains'].append({'trainNumber': '', 'time': '', 'track': ''})
         data['trains'][i]['trainNumber'] = departure_data[i]['ToLocation']
         data['trains'][i]['time'] = departure_data[i]['EstimatedTime']
         data['trains'][i]['track'] = departure_data[i]['TrackAtLocation']
-        i += 1
 
     with mutex, open('data.json', 'w') as datafile:
         json.dump(data, datafile, indent=3)
@@ -1406,7 +1419,8 @@ async def send_new_entry() -> None:
 
         entries_in_gui += 1
 
-        if entries_in_gui == 9:
+        if entries_in_gui == 4:
+            await departure_to_data()
             send_data.clear()
 
 
