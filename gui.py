@@ -12,7 +12,7 @@ import hmac
 import hashlib
 import configparser
 
-logging.basicConfig(format='%(asctime)s - %(levelname)s - %(funcName)s - %(message)s', level=logging.INFO)
+logging.basicConfig(format='%(asctime)s - %(levelname)s - %(funcName)s - %(message)s', level=logging.ERROR)
 _logger = logging.getLogger(__file__)
 
 # Modbus variables
@@ -74,6 +74,8 @@ class TrainStation(ctk.CTk):
         # Create the track layout
         self.create_track_layout()
 
+        self.current_switch_location = 1
+
     def create_timetable_layout(self):
         """Create the timetable layout in the timetable frame"""
         # Create labels for each header
@@ -123,11 +125,14 @@ class TrainStation(ctk.CTk):
 
     def track_switch(self, track_switch):
         """create a track switch that points at a specific track"""
+        old_switch_canvas = self.track_switch_canvases[self.current_switch_location-1]
+        old_switch_canvas.delete("all")
         track_switch_index = track_switch - 1
         track_switch_canvas = self.track_switch_canvases[track_switch_index]
-        track_switch_canvas.create_polygon(20, 20, 80, 20, 50, 0, fill="pink")
-        track_switch_canvas.create_line(50, 60, 50, 20, fill="pink", width=5)
-        track_switch_canvas.create_text(50, 70, text="Track switch", font=self.text_font, fill="pink")
+        track_switch_canvas.create_polygon(20 , 20, 80, 20, 50, 0, fill = "pink")
+        track_switch_canvas.create_line(50, 60, 50, 20, fill = "pink", width = 5)
+        track_switch_canvas.create_text(50, 70, text="Track switch", font = self.text_font, fill = "pink")
+        self.current_switch_location = track_switch
 
     def create_train(self, track):
         """Creates a train on a given track(1-6) outside the train station"""
@@ -151,7 +156,7 @@ class TrainStation(ctk.CTk):
         # Create the train on the track canvas
         train = track_canvas.create_rectangle(30, 0, 70, 100, fill="blue")  # Create train in the train station
         # Set the specified track to occupied
-        self.track_indicator_update(track, "Occupied")
+        self.track_indicator_update(track, "O")
         # Append it to the nested list of trains in a given track
         self.trains[track_index].append([train])
 
@@ -179,7 +184,7 @@ class TrainStation(ctk.CTk):
                 self.after(50, self.train_arrive, track, track_canvas, train_object,
                            current_y - 2)  # Schedule next move after 50 milliseconds
             else:  # When train arrive
-                self.track_indicator_update(track, "Occupied")  # Update track indicator to occupied
+                self.track_indicator_update(track, "O")  # Update track indicator to occupied
 
     def move_train_from_station(self, track, train_number):
         """Moves a given train on a given track out of the train station"""
@@ -202,13 +207,12 @@ class TrainStation(ctk.CTk):
             self.after(50, self.train_depart, track_index, track_canvas, train_index, train_object,
                        current_y + 2)  # Schedule next move after 50 milliseconds
         else:  # When train is out of the station
-            self.track_indicator_update(track_index + 1, "Available")  # Update the track indicator to available
+            self.track_indicator_update(track_index + 1, "A")  # Update the track indicator to available
             self.trains = self.trains[track_index].pop(train_index)  # Remove the train from the trains list
 
     def add_data_timetable(self, index, data):
         """Add a train in the timetable"""
         self.timetable_data.insert(index, data)
-
         # Remove all the old data in the timetable frame
         for obj in self.timetable_frame.winfo_children():
             obj.grid_forget()
@@ -282,21 +286,25 @@ class TrainStation(ctk.CTk):
                     self.track_switch(int(data[1]))
                 case "R":
                     # Packet ["R", "index"]
-                    self.move_train_to_station(int(data[1]), 1)
+                    self.move_train_from_station(int(data[1]), 1)
+                    self.remove_data_timetable(int(data[2]))
                 case "T":
                     # Packet ["T", "track", "status"]
                     self.track_indicator_update(int(data[1]), data[2])
                 case "U":
                     # Packet ["U", "id", EstimatedTime, "track"]
+                    # Packet ["U", "index", EstimatedTime, "track"]
+                    #location = self.timetable_data[int(data[1])][1]
+                    #self.remove_data_timetable(int(data[1]))
+                    #self.add_data_timetable(int(data[1], [data[2], str(location), data[3]]))
                     pass
-                    # self.add_data_timetable(data[1], [data[3], ])
                 case "H":
                     # Packet: ["H", "track"]
-                    train_station_hmi.create_train(data[1])
+                    train_station_hmi.create_train(int(data[1]))
                 case "B":
-                    self.remove_data_timetable(intdata[1])
+                    self.remove_data_timetable(int(data[1]))
                 case "C":
-                    self.create_train_in_station(data[1])
+                    self.create_train_in_station(int(data[1]))
 
         self.after(1000, self.process_modbus_data)
 
