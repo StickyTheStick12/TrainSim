@@ -622,6 +622,7 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                             track_status_sim[data[1] - 1].clear()
                             real_track_status[data[1] - 1] = "A"
                             _logger.info("Cleared track")
+                            track_semaphore.release()
                             modbus_data_queue.put(["R", train['TrackAtLocation'], str(idx)])
                         else:
                             modbus_data_queue.put(["B", str(idx)])
@@ -912,6 +913,8 @@ async def arrival() -> None:
 
             # Retrieve the track number from the JSON data
             track_number = int(first_entry['TrackAtLocation'])
+            
+           await track_semaphore.acquire()
 
             if not track_status_sim[track_number - 1].is_set():
                 # If the track is available, occupy it and update track status
@@ -931,32 +934,6 @@ async def arrival() -> None:
                         # Update the track information in departure
                         modbus_data_queue.put(["U", "0", str(track_number)])
                         break
-
-                    # await the departure of a train to be able to get a track
-                    _logger.info("No track available. Waiting for a clear track")
-                    _, pending = await asyncio.wait([track_status_sim[i].wait() for i in range(6)],
-                                                    return_when=asyncio.FIRST_COMPLETED)
-
-                    _logger.info("A track is available")
-
-                if not track_status_sim[track_number - 1].is_set():
-                    # If the track is available, occupy it and update track status
-                    _logger.info("Original track was available for arrival")
-                    modbus_data_queue.put(["s", 1, str(track_number)])
-                    modbus_data_queue.put(["t", track_number, "O"])
-                else:
-                    for i in range(6):
-                        if not track_status_sim[i].is_set():
-                            # If the alternate track is available, occupy it and update track status
-                            _logger.info("Original track wasn't available, chose another track instead")
-                            track_number = i + 1
-                            json_data[0]['TrackAtLocation'] = str(track_number)
-                            modbus_data_queue.put(["t", track_number, "O"])
-                            modbus_data_queue.put(["s", 1, str(track_number)])
-
-                            # Update the track information in depafirture
-                            modbus_data_queue.put(["U", "0", str(track_number)])
-                            break
 
             # Wait for the arrival event
             await arrival_event.wait()
