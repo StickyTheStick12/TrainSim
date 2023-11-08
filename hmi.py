@@ -30,7 +30,7 @@ from pymodbus.server import StartAsyncTlsServer
 
 from cryptography.fernet import Fernet
 
-logging.basicConfig(format='%(asctime)s - %(levelname)s - %(funcName)s - %(message)s', level=logging.ERROR)
+logging.basicConfig(format='%(asctime)s - %(levelname)s - %(funcName)s - %(message)s', level=logging.INFO)
 _logger = logging.getLogger(__file__)
 
 # Modbus variables
@@ -439,6 +439,7 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
             real_track_status[int(d_train['TrackAtLocation']) - 1] = "O"
             modbus_data_queue.put(["T", d_train['TrackAtLocation'], "O"])
             modbus_data_queue.put(["C", d_train['TrackAtLocation']])
+            await track_semaphore.acquire()
         else:
             if success:
                 break
@@ -770,7 +771,7 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                     _logger.debug("Sending data")
                     context[slave_id].setValues(func_code, address, data_to_send)
 
-                    _logger.info("Resetting flag")
+                    _logger.debug("Resetting flag")
                     context[slave_id].setValues(func_code, datastore_size - 2, [0])
 
                     expected_signature = hmac.new(modbus_secret_key, str(nonce).encode(), hashlib.sha256).hexdigest()
@@ -780,11 +781,11 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                     _logger.debug(f"Expecting: {expected_signature}")
 
                     while context[slave_id].getValues(func_code, datastore_size - 2, 1) == [0]:
-                        _logger.info("Waiting for client to copy datastore; sleeping 1 second")
+                        _logger.debug("Waiting for client to copy datastore; sleeping 1 second")
                         await asyncio.sleep(1)  # give the server control so it can answer the client
 
                     if context[slave_id].getValues(func_code, 0, 64) == expected_signature:
-                        _logger.info("Client is verified")
+                        _logger.debug("Client is verified")
                         client_verified = True
                     else:
                         _logger.critical("Found wrong signature in holding register")
@@ -916,7 +917,7 @@ async def arrival() -> None:
             # Retrieve the track number from the JSON data
             track_number = int(first_entry['TrackAtLocation'])
             
-           await track_semaphore.acquire()
+            await track_semaphore.acquire()
 
             if not track_status_sim[track_number - 1].is_set():
                 # If the track is available, occupy it and update track status
@@ -932,6 +933,8 @@ async def arrival() -> None:
                         json_data[0]['TrackAtLocation'] = str(track_number)
                         modbus_data_queue.put(["t", track_number, "O"])
                         modbus_data_queue.put(["s", 1, str(track_number)])
+
+                        await write_to_file(json_data, 0)
 
                         # Update the track information in departure
                         modbus_data_queue.put(["U", "0", str(track_number)])
@@ -1409,7 +1412,7 @@ async def send_new_entry() -> None:
 if __name__ == '__main__':
     modbus_process = multiprocessing.Process(target=modbus_helper)
     modbus_process.start()
-    SQL.start()
+
     app.run(ssl_context=(cert, key), debug=False, port=5001)
     SQL.closeSession()
 
