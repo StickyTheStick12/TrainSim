@@ -622,7 +622,7 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                             track_status_sim[data[1] - 1].clear()
                             real_track_status[data[1] - 1] = "A"
                             _logger.info("Cleared track")
-                            modbus_data_queue.put(["R", train['TrackAtLocation']])
+                            modbus_data_queue.put(["R", train['TrackAtLocation'], str(idx)])
                         else:
                             modbus_data_queue.put(["B", str(idx)])
 
