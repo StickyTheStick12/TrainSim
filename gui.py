@@ -316,7 +316,8 @@ def modbus_client_thread() -> None:
 
     config = configparser.ConfigParser()
     config.read('config.ini')
-    secret_key = config.get('Credentials', 'MODBUS_DATA_KEY').encode()    
+    secret_key = config.get('Credentials', 'MODBUS_DATA_KEY').encode()
+
     highest_data_id = 0
 
     async def run_client() -> None:
