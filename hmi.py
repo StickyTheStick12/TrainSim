@@ -595,7 +595,7 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                 for idx, train in enumerate(json_data):
                     if 'id' in train and train['id'] == str(data[2]):
                         has_arrived = False
-                        _logger.info("Train hasn't arrived yet")
+                        _logger.error("Train hasn't arrived yet")
                         if idx == 0:
                             wake_arrival.set()
 
@@ -620,7 +620,7 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                             track_status_sim[data[1] - 1].clear()
                             real_track_status[data[1] - 1] = "A"
                             _logger.info("Cleared track")
-                            modbus_data_queue.put(["R", train['TrackAtLocation'], str(idx)])
+                            modbus_data_queue.put(["R", train['TrackAtLocation']])
                         else:
                             modbus_data_queue.put(["B", str(idx)])
 
@@ -737,9 +737,9 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                 _logger.info("sent new secret key")
                 sequence_number = 0
 
-                _logger.info("updated HMAC in files")
                 await write_to_file(arrival_data, 0)
                 await write_to_file(departure_data, 1)
+                _logger.info("updated HMAC in files")
             case "g":
                 json_data = await read_from_file(1)
                 modbus_data_queue.put(['r', int(json_data[data[1]]['TrackAtLocation']), json_data[data[1]]['id']])
@@ -1262,6 +1262,7 @@ async def train_match() -> None:
             formatted_str = atrain['AdvertisedTime'].replace('-', ' ').replace(' ', ':')
             atraintime = datetime.strptime(formatted_str, timeformat)
             for dtrain in departure_data:
+
                 # if the dtrain is on the same track as the atrain and it doesnt have an id
                 if dtrain['TrackAtLocation'] == atrain['TrackAtLocation'] and len(dtrain) == 4:
 
