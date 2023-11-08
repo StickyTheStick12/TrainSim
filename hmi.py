@@ -51,6 +51,8 @@ arrival_event = asyncio.Event()
 wake_arrival = asyncio.Event()
 wake_departure = asyncio.Event()
 
+track_semaphore = asyncio.Semaphore(value=6)
+
 track1 = asyncio.Event()
 track2 = asyncio.Event()
 track3 = asyncio.Event()
