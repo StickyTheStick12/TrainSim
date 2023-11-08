@@ -469,6 +469,8 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
 
     _logger.info("Connected to asyncio server")
 
+    await update_keys(modbus_secret_key)
+
     while True:
         # Run blocking call in executor so all the other tasks can run and the server
         data = await loop.run_in_executor(None, modbus_data_queue.get)
@@ -1428,8 +1430,6 @@ async def send_new_entry() -> None:
 if __name__ == '__main__':
     modbus_process = multiprocessing.Process(target=modbus_helper)
     modbus_process.start()
-    
-    SQL.start()
 
     app.run(ssl_context=(cert, key), debug=False, port=5001)
     SQL.closeSession()
