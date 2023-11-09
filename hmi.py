@@ -36,6 +36,8 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import dh
 from cryptography.fernet import Fernet
 
+# todo decide on aiofiles and aiohttp
+
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(funcName)s - %(message)s', level=logging.INFO)
 _logger = logging.getLogger(__file__)
 
@@ -53,7 +55,8 @@ mutex = multiprocessing.Lock()
 last_acquired_switch = datetime.now() - timedelta(minutes=3)
 departure_event = asyncio.Event()
 arrival_event = asyncio.Event()
-
+arrival_switch_request = asyncio.Event()
+departure_switch_request = asyncio.Event()
 wake_arrival = asyncio.Event()
 wake_departure = asyncio.Event()
 
@@ -338,6 +341,8 @@ def sortTimeTable(train_list):
     return train_list
 
 
+# ------------------------------- #
+
 async def modbus_server_thread(context: ModbusServerContext) -> None:
     """Creates the server that will listen at localhost"""
 
@@ -375,6 +380,266 @@ def setup_server() -> ModbusServerContext:
 
     _logger.debug("Created datastore")
     return context
+
+
+async def update_departure() -> None:
+    """Updates departure.json every 1 hour, won't remove anything just update with new trains"""
+    global modbus_data_queue
+
+    while True:
+        xml_departure = """<REQUEST>
+        <LOGIN authenticationkey='eb2fa89aebd243cb9cba7068aac73244'/> 
+        <QUERY objecttype='TrainAnnouncement' orderby='AdvertisedTimeAtLocation' schemaversion='1.8'>
+            <FILTER>
+                <AND>
+                    <OR>
+                        <AND>
+                            <GT name='AdvertisedTimeAtLocation' value='$dateadd(00:00:00)' /> 
+                            <LT name='AdvertisedTimeAtLocation' value='$dateadd(18:00:00)' />
+                        </AND>
+                        <GT name='EstimatedTimeAtLocation' value='$now' />
+                    </OR>
+                    <EQ name='LocationSignature' value='ck' />
+                    <EQ name='ActivityType' value='Avgang' />
+                </AND>
+            </FILTER>
+            <INCLUDE>AdvertisedTimeAtLocation</INCLUDE>
+            <INCLUDE>TrackAtLocation</INCLUDE>
+            <INCLUDE>ToLocation</INCLUDE>
+            <INCLUDE>TrainOwner</INCLUDE>   
+        </QUERY>
+        </REQUEST>"""
+
+        headers = {'Content-Type': 'text/xml'}
+
+        def update_existing_data(new_data) -> list:
+            updated_data = []
+
+            for idx, existing_train in enumerate(existing_data):
+                # Check if there is a corresponding entry in the new data
+                corresponding_entry = next(
+                    (new_train for new_train in new_data if
+                     datetime.strptime(existing_train['AdvertisedTime'], "%Y-%m-%d %H:%M") == datetime.strptime(
+                         new_train['EstimatedTime'], "%Y-%m-%d %H:%M")
+                     and existing_train['TrainOwner'] == new_train['TrainOwner']),
+                    None
+                )
+
+                if corresponding_entry:
+                    if datetime.strptime(existing_train['EstimatedTime'], "%Y-%m-%d %H:%M") != datetime.strptime(
+                            corresponding_entry['EstimatedTime'], "%Y-%m-%d %H:%M") \
+                            and not existing_train['IsRemoved']:
+
+                        if idx == 0:
+                            if departure_switch_request.is_set():
+                                # if the first departure entry already has asked for the switch, don't change its value
+                                continue
+
+                            # wake the departure function so it uses the new estimated time instead
+                            wake_departure.set()
+
+                        # Update the estimated time for the existing entry with the new data
+                        existing_train['EstimatedTime'] = corresponding_entry['EstimatedTime']
+
+                        if idx < 4:
+                            modbus_data_queue.put(["U", str(idx), existing_train['EstimatedTime'],
+                                                   existing_train['TrackAtLocation']])
+
+                # Packet ["U", "idx", EstimatedTime, "track"]
+                updated_data.append(existing_train)
+
+            # Add new entries that don't exist in the existing data
+            new_entries = [new_train for new_train in new_data
+                           if not any(existing_train['AdvertisedTime'] == new_train['AdvertisedTime']
+                                      and existing_train.get('TrainOwner') == new_train.get('TrainOwner')
+                                      for existing_train in existing_data)]
+
+            # Combine existing data and new entries
+            updated_data += new_entries
+
+            return updated_data
+
+        # Load existing data from the previous JSON file or create an empty list if the file doesn't exist
+        existing_data = await read_from_file(1)
+
+        new_api_response = requests.post('https://api.trafikinfo.trafikverket.se/v2/data.json', data=xml_departure,
+                                         headers=headers).content
+
+        # Check if the API response is not None
+        if new_api_response is not None:
+            # Load new data from the API response
+            new_response_dict = json.loads(new_api_response.decode('utf-8'))
+            new_train_info_list = new_response_dict['RESPONSE']['RESULT'][0]['TrainAnnouncement']
+
+            # Convert new data to the desired format
+            new_formatted_data = []
+
+            for new_train_info in new_train_info_list:
+                advertised_time = datetime.strptime(new_train_info['AdvertisedTimeAtLocation'],
+                                                    "%Y-%m-%dT%H:%M:%S.%f%z").strftime("%Y-%m-%d %H:%M")
+                estimated_time = datetime.strptime(
+                    new_train_info.get('EstimatedTimeAtLocation', new_train_info['AdvertisedTimeAtLocation']),
+                    "%Y-%m-%dT%H:%M:%S.%f%z").strftime("%Y-%m-%d %H:%M")
+
+                to_location = "Köpenhamn" if any(location.get('LocationName') == 'Dk.kh' for location in
+                                                 new_train_info.get("ToLocation", [])) else "Emmaboda"
+
+                if new_train_info['TrackAtLocation'] != "-":
+                    train_data = {
+                        'AdvertisedTime': advertised_time,
+                        'EstimatedTime': estimated_time,
+                        'ToLocation': to_location,
+                        'TrackAtLocation': new_train_info['TrackAtLocation'],
+                        'TrainOwner': new_train_info['TrainOwner'],
+                        'IsRemoved': False
+                    }
+
+                    new_formatted_data.append(train_data)
+
+            # Update existing data with new data
+            updated_data = update_existing_data(new_formatted_data)
+
+            # Save updated data to the JSON file
+            await write_to_file(updated_data, 1)
+            await departure_to_data()
+
+            _logger.info("Data has been updated in departure.json")
+        else:
+            _logger.error("API response is None. Check for issues with the API call.")
+
+        _logger.info(f"Sleeping 1 hours. Next update {(datetime.now() + timedelta(hours=1)).strftime('%H:%M')}")
+        await asyncio.sleep(1 * 60 * 60)
+
+
+async def update_arrival() -> None:
+    """Updates arrival.json every 15 minutes with new trains and update estimated time for all the trains"""
+    while True:
+        xml_arrival = """<REQUEST>
+                    <LOGIN authenticationkey='eb2fa89aebd243cb9cba7068aac73244'/> 
+                    <QUERY objecttype='TrainAnnouncement' orderby='AdvertisedTimeAtLocation' schemaversion='1.8'>
+                        <FILTER>
+                            <AND>
+                                <OR>
+                                    <AND>
+                                        <GT name='AdvertisedTimeAtLocation' value='$dateadd(00:00:00)' /> 
+                                        <LT name='AdvertisedTimeAtLocation' value='$dateadd(18:00:00)' />
+                                    </AND>
+                                    <GT name='EstimatedTimeAtLocation' value='$now' />
+                                </OR>
+                                <EQ name='LocationSignature' value='ck' />
+                                <EQ name='ActivityType' value='Ankomst' />
+                            </AND>
+                        </FILTER>
+                        <INCLUDE>AdvertisedTimeAtLocation</INCLUDE>
+                        <INCLUDE>EstimatedTimeAtLocation</INCLUDE>
+                        <INCLUDE>TrackAtLocation</INCLUDE>
+                        <INCLUDE>TrainOwner</INCLUDE>
+                    </QUERY>
+                    </REQUEST>"""
+        headers = {'Content-Type': 'text/xml'}
+
+        def update_existing_data(new_data) -> list:
+            updated_data = []
+
+            for idx, existing_train in enumerate(existing_data):
+                # Check if there is a corresponding entry in the new data
+                corresponding_entry = next(
+                    (new_train for new_train in new_data if
+                     datetime.strptime(existing_train['AdvertisedTime'], "%Y-%m-%d %H:%M") == datetime.strptime(
+                         new_train['EstimatedTime'], "%Y-%m-%d %H:%M")
+                     and existing_train['TrainOwner'] == new_train['TrainOwner']),
+                    None
+                )
+
+                if corresponding_entry:
+                    if datetime.strptime(existing_train['EstimatedTime'], "%Y-%m-%d %H:%M") != datetime.strptime(
+                            corresponding_entry['EstimatedTime'], "%Y-%m-%d %H:%M") \
+                            and not existing_train['IsRemoved']:
+
+                        if idx == 0:
+                            if arrival_switch_request.is_set():
+                                # if the first departure entry already has asked for the switch, don't change its value
+                                continue
+
+                            # wake the departure function so it uses the new estimated time instead
+                            wake_arrival.set()
+
+                        # Update the estimated time for the existing entry with the new data
+                        existing_train['EstimatedTime'] = corresponding_entry['EstimatedTime']
+
+                # Packet ["U", "idx", EstimatedTime, "track"]
+                updated_data.append(existing_train)
+
+            # Add new entries that don't exist in the existing data
+            new_entries = [new_train for new_train in new_data
+                           if not any(existing_train['AdvertisedTime'] == new_train['AdvertisedTime']
+                                      and existing_train.get('TrainOwner') == new_train.get('TrainOwner')
+                                      for existing_train in existing_data)]
+
+            # Combine existing data and new entries
+            updated_data += new_entries
+
+            return updated_data
+
+        existing_data = await read_from_file(0)
+
+        new_api_response = requests.post('https://api.trafikinfo.trafikverket.se/v2/data.json', data=xml_arrival,
+                                         headers=headers).content
+
+        # Check if the API response is not None
+        if new_api_response is not None:
+            # Load new data from the API response
+            new_response_dict = json.loads(new_api_response.decode('utf-8'))
+            new_train_info_list = new_response_dict['RESPONSE']['RESULT'][0]['TrainAnnouncement']
+
+            # Convert new data to the desired format
+            new_formatted_data = []
+
+            for new_train_info in new_train_info_list:
+                advertised_time = datetime.strptime(new_train_info['AdvertisedTimeAtLocation'],
+                                                    "%Y-%m-%dT%H:%M:%S.%f%z").strftime("%Y-%m-%d %H:%M")
+                estimated_time = datetime.strptime(
+                    new_train_info.get('EstimatedTimeAtLocation', new_train_info['AdvertisedTimeAtLocation']),
+                    "%Y-%m-%dT%H:%M:%S.%f%z").strftime("%Y-%m-%d %H:%M")
+                if datetime.now().hour <= int(advertised_time.split()[1].split(":")[0]):
+
+                    if new_train_info['TrackAtLocation'] != "-":
+                        train_data = {
+                            'AdvertisedTime': advertised_time,
+                            'EstimatedTime': estimated_time,
+                            'TrackAtLocation': new_train_info['TrackAtLocation'],
+                            'TrainOwner': new_train_info['TrainOwner'],
+                            'IsRemoved': False
+                        }
+
+                        new_formatted_data.append(train_data)
+
+            # Update existing data with new data
+            updated_data = update_existing_data(new_formatted_data)
+
+            # Save updated data to the JSON file
+            await write_to_file(updated_data, 0)
+
+            _logger.info("Updated values in arrival.json")
+        else:
+            _logger.error("API response was None")
+
+        _logger.info(f"Sleeping 15 minutes. Next update {datetime.now() + timedelta(minutes=15):%H:%M}")
+        await asyncio.sleep(15 * 60)
+
+
+def modbus_helper() -> None:
+    """Sets up server and send data task"""
+    loop = asyncio.new_event_loop()
+    context = setup_server()
+
+    loop.create_task(handle_simulation_communication(context))
+    loop.run_until_complete(modbus_server_thread(context))
+
+    return
+
+
+# ------------------------------- #
 
 
 async def departure() -> None:
@@ -464,6 +729,7 @@ async def departure() -> None:
         # sleep 0.5 seconds so we can send data to the gui so it will show that the train has arrived
         await asyncio.sleep(0.5)
 
+
 # TODO:
 # packet a doesen't need id (?)
 
@@ -549,140 +815,6 @@ async def arrival() -> None:
                 await asyncio.sleep(0.5)
 
 
-async def update_arrival() -> None:
-    """Updates arrival.json every 15 minutes with new trains and update estimated time for all the trains"""
-    while True:
-        xml_arrival = """<REQUEST>
-                    <LOGIN authenticationkey='eb2fa89aebd243cb9cba7068aac73244'/> 
-                    <QUERY objecttype='TrainAnnouncement' orderby='AdvertisedTimeAtLocation' schemaversion='1.8'>
-                        <FILTER>
-                            <AND>
-                                <OR>
-                                    <AND>
-                                        <GT name='AdvertisedTimeAtLocation' value='$dateadd(00:00:00)' /> 
-                                        <LT name='AdvertisedTimeAtLocation' value='$dateadd(18:00:00)' />
-                                    </AND>
-                                    <GT name='EstimatedTimeAtLocation' value='$now' />
-                                </OR>
-                                <EQ name='LocationSignature' value='ck' />
-                                <EQ name='ActivityType' value='Ankomst' />
-                            </AND>
-                        </FILTER>
-                        <INCLUDE>AdvertisedTimeAtLocation</INCLUDE>
-                        <INCLUDE>EstimatedTimeAtLocation</INCLUDE>
-                        <INCLUDE>TrackAtLocation</INCLUDE>
-                    </QUERY>
-                    </REQUEST>"""
-        headers = {'Content-Type': 'text/xml'}
-
-        def update_existing_data(new_data) -> list:
-            updated_data = []
-
-            update_gui = True
-            # TODO fix so we can check the operator of the train, because a hmi train can have the same advertised time as some other train
-            # TODO. should also have a parameter, deleted because otherwise we may add a train that we previously deleted. So we won't remove the train until the actual arrival
-    
-            for existing_train in existing_data:
-                # Check if there is a corresponding entry in the new data
-                for new_train in new_data:
-                    if existing_train['AdvertisedTime'] == new_train['AdvertisedTime']
-
-                corresponding_entry = next(
-                    (new_train for new_train in new_data if
-                     existing_train['AdvertisedTime']),
-                    None
-                )
-
-                if corresponding_entry:
-                    # Update the estimated time for the existing entry with the new data
-                    if existing_train['EstimatedTime'] != corresponding_entry['EstimatedTime']:
-                        # TODO update times in gui/
-
-                    existing_train['EstimatedTime'] = corresponding_entry['EstimatedTime']
-
-
-                updated_data.append(existing_train)
-
-            # Add new entries that don't exist in the existing data
-            new_entries = [new_train for new_train in new_data
-                           if not any(existing_train['AdvertisedTime'] == new_train['AdvertisedTime']
-                                      for existing_train in existing_data) and new_train['TrackAtLocation'] != "-"]
-
-            # Combine existing data and new entries
-            updated_data += new_entries
-
-            return updated_data
-
-        existing_data = await read_from_file(0)
-
-        new_api_response = requests.post('https://api.trafikinfo.trafikverket.se/v2/data.json', data=xml_arrival,
-                                         headers=headers).content
-
-        # Check if the API response is not None
-        if new_api_response is not None:
-            # Load new data from the API response
-            new_response_dict = json.loads(new_api_response.decode('utf-8'))
-            new_train_info_list = new_response_dict['RESPONSE']['RESULT'][0]['TrainAnnouncement']
-
-            # Convert new data to the desired format
-            new_formatted_data = []
-
-            for new_train_info in new_train_info_list:
-                advertised_time = datetime.strptime(new_train_info['AdvertisedTimeAtLocation'],
-                                                    "%Y-%m-%dT%H:%M:%S.%f%z").strftime("%Y-%m-%d %H:%M")
-                estimated_time = datetime.strptime(
-                    new_train_info.get('EstimatedTimeAtLocation', new_train_info['AdvertisedTimeAtLocation']),
-                    "%Y-%m-%dT%H:%M:%S.%f%z").strftime("%Y-%m-%d %H:%M")
-                if datetime.now().hour <= int(advertised_time.split()[1].split(":")[0]):
-
-                    if new_train_info['TrackAtLocation'] != "-":
-                        train_data = {
-                            'AdvertisedTime': advertised_time,
-                            'EstimatedTime': estimated_time,
-                            'TrackAtLocation': new_train_info['TrackAtLocation'],
-                        }
-
-                        new_formatted_data.append(train_data)
-
-            # Update existing data with new data
-            updated_data = update_existing_data(new_formatted_data)
-
-            # Save updated data to the JSON file
-            await write_to_file(updated_data, 0)
-
-            _logger.info("Updated values in arrival.json")
-        else:
-            _logger.error("API response was None")
-
-        _logger.info(f"Sleeping 15 minutes. Next update {datetime.now() + timedelta(minutes=15):%H:%M}")
-        await asyncio.sleep(15 * 60)
-
-
-
-
-def modbus_helper() -> None:
-    """Sets up server and send data task"""
-    loop = asyncio.new_event_loop()
-    context = setup_server()
-
-    loop.create_task(handle_simulation_communication(context))
-    loop.run_until_complete(modbus_server_thread(context))
-
-    return
-
-
-
-
-
-
-# ------------------------------- #
-
-
-
-
-
-
-
 def modbus_helper() -> None:
     """Sets up server and send data task"""
     loop = asyncio.new_event_loop()
@@ -725,10 +857,10 @@ def modbus_helper() -> None:
 
     # Derive a key from the shared secret using a key derivation function (KDF)
     derived_key = HKDF(
-    algorithm=hashes.SHA256(),
-    length=32,
-    salt=None,
-    info=b'handshake data',
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=None,
+        info=b'handshake data',
     ).derive(shared_secret)
 
     # Use the key material to generate a Fernet key
@@ -740,7 +872,6 @@ def modbus_helper() -> None:
     loop.run_until_complete(modbus_server_thread(context))
 
     return
-
 
 
 async def handle_simulation_communication(context: ModbusServerContext) -> None:
@@ -853,7 +984,7 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
 
         # ----------------- SIMULATION ----------------- #
         # a: A "status" message that a train has arrived at the station. Updates the real track status. Attack helper.
-        # Packet: ["a", id, track]
+        # Packet: ["a", track]
 
         # s: helps handling the request for the switch and updates last acquired switch time.
         # Packet: ["s", func_code, "track_number", (func_code 1 only) "arrival time"]
@@ -1136,12 +1267,6 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                         _logger.critical("Found wrong signature in holding register")
 
 
-
-
-
-
-
-
 async def acquire_switch(switch_queue: asyncio.Queue) -> None:
     """Empties the switch queue and keeps track of when the switch will be available,
     then notifies the correct function."""
@@ -1175,121 +1300,6 @@ async def acquire_switch(switch_queue: asyncio.Queue) -> None:
 
         # give the train 60 seconds to arrive/depart
         await asyncio.sleep(60)
-
-
-
-
-
-async def update_departure() -> None:
-    """Updates departure.json every 1 hour, won't remove anything just update with new trains"""
-    global modbus_data_queue
-
-    while True:
-        xml_departure = """<REQUEST>
-        <LOGIN authenticationkey='eb2fa89aebd243cb9cba7068aac73244'/> 
-        <QUERY objecttype='TrainAnnouncement' orderby='AdvertisedTimeAtLocation' schemaversion='1.8'>
-            <FILTER>
-                <AND>
-                    <OR>
-                        <AND>
-                            <GT name='AdvertisedTimeAtLocation' value='$dateadd(00:00:00)' /> 
-                            <LT name='AdvertisedTimeAtLocation' value='$dateadd(18:00:00)' />
-                        </AND>
-                        <GT name='EstimatedTimeAtLocation' value='$now' />
-                    </OR>
-                    <EQ name='LocationSignature' value='ck' />
-                    <EQ name='ActivityType' value='Avgang' />
-                </AND>
-            </FILTER>
-            <INCLUDE>AdvertisedTimeAtLocation</INCLUDE>
-            <INCLUDE>TrackAtLocation</INCLUDE>
-            <INCLUDE>ToLocation</INCLUDE>   
-        </QUERY>
-        </REQUEST>"""
-
-        headers = {'Content-Type': 'text/xml'}
-
-        def update_existing_data(new_data) -> list:
-            updated_data = []
-
-            for idx, existing_train in enumerate(existing_data):
-                # Check if there is a corresponding entry in the new data
-                corresponding_entry = next(
-                    (new_train for new_train in new_data if
-                     existing_train['AdvertisedTime'] == new_train['AdvertisedTime']
-                     and existing_train['TrackAtLocation'] == new_train['TrackAtLocation']),
-                    None
-                )
-
-                if corresponding_entry:
-                    # Update the estimated time for the existing entry with the new data
-                    existing_train['EstimatedTime'] = corresponding_entry['EstimatedTime']
-
-                    if idx < 11:
-                        modbus_data_queue.put["U", str(idx), existing_train['EstimatedTime'],
-                        existing_train['TrackAtLocation']]
-
-                    # Packet ["U", "id", EstimatedTime, "track"]
-
-                updated_data.append(existing_train)
-
-            # Add new entries that don't exist in the existing data
-            new_entries = [new_train for new_train in new_data
-                           if not any(existing_train['AdvertisedTime'] == new_train['AdvertisedTime']
-                                      for existing_train in existing_data) and new_train['TrackAtLocation'] != "-"]
-
-            # Combine existing data and new entries
-            updated_data += new_entries
-
-            return updated_data
-
-        # Load existing data from the previous JSON file or create an empty list if the file doesn't exist
-        existing_data = await read_from_file(1)
-
-        new_api_response = requests.post('https://api.trafikinfo.trafikverket.se/v2/data.json', data=xml_departure,
-                                         headers=headers).content
-
-        # Check if the API response is not None
-        if new_api_response is not None:
-            # Load new data from the API response
-            new_response_dict = json.loads(new_api_response.decode('utf-8'))
-            new_train_info_list = new_response_dict['RESPONSE']['RESULT'][0]['TrainAnnouncement']
-
-            # Convert new data to the desired format
-            new_formatted_data = []
-
-            for new_train_info in new_train_info_list:
-                advertised_time = datetime.strptime(new_train_info['AdvertisedTimeAtLocation'],
-                                                    "%Y-%m-%dT%H:%M:%S.%f%z").strftime("%Y-%m-%d %H:%M")
-                estimated_time = datetime.strptime(
-                    new_train_info.get('EstimatedTimeAtLocation', new_train_info['AdvertisedTimeAtLocation']),
-                    "%Y-%m-%dT%H:%M:%S.%f%z").strftime("%Y-%m-%d %H:%M")
-
-                to_location = "Köpenhamn" if any(location.get('LocationName') == 'Dk.kh' for location in
-                                                 new_train_info.get("ToLocation", [])) else "Emmaboda"
-
-                if new_train_info['TrackAtLocation'] != "-":
-                    train_data = {
-                        'AdvertisedTime': advertised_time,
-                        'EstimatedTime': estimated_time,
-                        'ToLocation': to_location,
-                        'TrackAtLocation': new_train_info['TrackAtLocation']
-                    }
-
-                    new_formatted_data.append(train_data)
-
-            # Update existing data with new data
-            updated_data = update_existing_data(new_formatted_data)
-
-            # Save updated data to the JSON file
-            await write_to_file(updated_data, 1)
-            await departure_to_data()
-
-            _logger.info("Data has been updated in departure.json")
-        else:
-            _logger.error("API response is None. Check for issues with the API call.")
-        _logger.info(f"Sleeping 1 hours. Next update {(datetime.now() + timedelta(hours=1)).strftime('%H:%M')}")
-        await asyncio.sleep(1 * 60 * 60)
 
 
 async def update_keys(secret_key: bytes) -> None:
