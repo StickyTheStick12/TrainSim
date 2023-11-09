@@ -1,9 +1,9 @@
-from cryptography.fernet import Fernet
-
 import customtkinter as ctk
 from pymodbus.client import AsyncModbusTlsClient
 from pymodbus.transaction import ModbusTlsFramer
 from pymodbus.exceptions import ModbusException
+
+# TODO: fix update packet
 
 import asyncio
 import logging
@@ -11,8 +11,17 @@ import multiprocessing
 import hmac
 import hashlib
 import configparser
+import socket
+import base64
 
-logging.basicConfig(format='%(asctime)s - %(levelname)s - %(funcName)s - %(message)s', level=logging.ERROR)
+from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import dh
+from cryptography.fernet import Fernet
+
+logging.basicConfig(format='%(asctime)s - %(levelname)s - %(funcName)s - %(message)s', level=logging.INFO)
 _logger = logging.getLogger(__file__)
 
 # Modbus variables
@@ -74,8 +83,6 @@ class TrainStation(ctk.CTk):
         # Create the track layout
         self.create_track_layout()
 
-        self.current_switch_location = 1
-
     def create_timetable_layout(self):
         """Create the timetable layout in the timetable frame"""
         # Create labels for each header
@@ -125,14 +132,11 @@ class TrainStation(ctk.CTk):
 
     def track_switch(self, track_switch):
         """create a track switch that points at a specific track"""
-        old_switch_canvas = self.track_switch_canvases[self.current_switch_location-1]
-        old_switch_canvas.delete("all")
         track_switch_index = track_switch - 1
         track_switch_canvas = self.track_switch_canvases[track_switch_index]
-        track_switch_canvas.create_polygon(20 , 20, 80, 20, 50, 0, fill = "pink")
-        track_switch_canvas.create_line(50, 60, 50, 20, fill = "pink", width = 5)
-        track_switch_canvas.create_text(50, 70, text="Track switch", font = self.text_font, fill = "pink")
-        self.current_switch_location = track_switch
+        track_switch_canvas.create_polygon(20, 20, 80, 20, 50, 0, fill="pink")
+        track_switch_canvas.create_line(50, 60, 50, 20, fill="pink", width=5)
+        track_switch_canvas.create_text(50, 70, text="Track switch", font=self.text_font, fill="pink")
 
     def create_train(self, track):
         """Creates a train on a given track(1-6) outside the train station"""
@@ -213,6 +217,7 @@ class TrainStation(ctk.CTk):
     def add_data_timetable(self, index, data):
         """Add a train in the timetable"""
         self.timetable_data.insert(index, data)
+
         # Remove all the old data in the timetable frame
         for obj in self.timetable_frame.winfo_children():
             obj.grid_forget()
@@ -286,18 +291,15 @@ class TrainStation(ctk.CTk):
                     self.track_switch(int(data[1]))
                 case "R":
                     # Packet ["R", "index"]
-                    self.move_train_from_station(int(data[1]), 1)
-                    self.remove_data_timetable(int(data[2]))
+                    self.move_train_to_station(int(data[1]), 1)
                 case "T":
                     # Packet ["T", "track", "status"]
                     self.track_indicator_update(int(data[1]), data[2])
                 case "U":
-                    # Packet ["U", "id", EstimatedTime, "track"]
                     # Packet ["U", "index", EstimatedTime, "track"]
-                    #location = self.timetable_data[int(data[1])][1]
-                    #self.remove_data_timetable(int(data[1]))
-                    #self.add_data_timetable(int(data[1], [data[2], str(location), data[3]]))
-                    pass
+                    location = self.timetable_data[int(data[1])][1]
+                    self.remove_data_timetable(int(data[1]))
+                    self.add_data_timetable(int(data[1]), [data[3], location, data[4]])
                 case "H":
                     # Packet: ["H", "track"]
                     train_station_hmi.create_train(int(data[1]))
@@ -314,9 +316,45 @@ def modbus_client_thread() -> None:
     client = None
     loop = asyncio.new_event_loop()
 
-    config = configparser.ConfigParser()
-    config.read('config.ini')
-    secret_key = config.get('Credentials', 'MODBUS_DATA_KEY').encode()
+    # ------------------------------------------------- #
+    p = 0xFFFFFFFFFFFFFFFFC90FDAA22168C234C4C6628B80DC1CD129024E088A67CC74020BBEA63B139B22514A08798E3404DDEF9519B3CD3A431B302B0A6DF25F14374FE1356D6D51C245E485B576625E7EC6F44C42E9A637ED6B0BFF5CB6F406B7EDEE386BFB5A899FA5AE9F24117C4B1FE649286651ECE45B3DC2007CB8A163BF0598DA48361C55D39A69163FA8FD24CF5F83655D23DCA3AD961C62F356208552BB9ED529077096966D670C354E4ABC9804F1746C08CA18217C32905E462E36CE3BE39E772C180E86039B2783A2EC07A28FB5C55DF06F4C52C9DE2BCBF6955817183995497CEA956AE515D2261898FA051015728E5A8AACAA68FFFFFFFFFFFFFFFF
+    g = 2
+    params_numbers = dh.DHParameterNumbers(p, g)
+    parameters = params_numbers.parameters(default_backend())
+
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+
+    s.connect(("localhost", 12347))
+
+    private_key = parameters.generate_private_key()
+    public_key = private_key.public_key()
+
+    public_key_bytes = public_key.public_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo
+    )
+
+    server_public_key = s.recv(2048)
+    s.sendall(public_key_bytes)
+
+    try:
+        s.recv(1024)
+    except socket.error:
+        pass
+
+    server_public_key = serialization.load_pem_public_key(server_public_key, backend=default_backend())
+
+    shared_secret = private_key.exchange(server_public_key)
+
+    derived_key = HKDF(
+    algorithm=hashes.SHA256(),
+    length=32,
+    salt=None,
+    info=b'handshake data',
+    ).derive(shared_secret)
+
+    secret_key = base64.urlsafe_b64encode(derived_key)
+    # ------------------------------------------------- #
 
     highest_data_id = 0
 
@@ -417,7 +455,7 @@ def modbus_client_thread() -> None:
             data = await reader.read(1024)
             cipher = Fernet(secret_key)
             secret_key = cipher.decrypt(data)
-            _logger.error("Updated secret key")
+            _logger.info("Updated secret key")
             highest_data_id = 0
 
         server = await asyncio.start_server(handle_client, "localhost", 12346)
