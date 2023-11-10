@@ -7,6 +7,8 @@ mysql
 pymodbus 3.5.4                                         
 customtkinter 5.2.0                                         
 cryptography                                         
+aiofiles                                         
+aiohttp                                         
 
 **How to run**                                          
 Start either hmi.py or gui.py. gui.py will log an error every second until the HMI.py starts but the error can be neglected. 
