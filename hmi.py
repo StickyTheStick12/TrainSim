@@ -85,8 +85,6 @@ login_manager.init_app(app)
 
 departure_file_version = 0
 arrival_file_version = 0
-
-modbus_secret_key = None
 file_secret_key = Fernet.generate_key()
 
 
@@ -1140,72 +1138,11 @@ async def acquire_switch(switch_queue: asyncio.Queue) -> None:
 # TODO:
 # packet a doesen't need id (?)
 
-
-def modbus_helper() -> None:
-    """Sets up server and send data task"""
-    loop = asyncio.new_event_loop()
-    context = setup_server()
-
-    # -------------------------------------------------#
-    p = 0xFFFFFFFFFFFFFFFFC90FDAA22168C234C4C6628B80DC1CD129024E088A67CC74020BBEA63B139B22514A08798E3404DDEF9519B3CD3A431B302B0A6DF25F14374FE1356D6D51C245E485B576625E7EC6F44C42E9A637ED6B0BFF5CB6F406B7EDEE386BFB5A899FA5AE9F24117C4B1FE649286651ECE45B3DC2007CB8A163BF0598DA48361C55D39A69163FA8FD24CF5F83655D23DCA3AD961C62F356208552BB9ED529077096966D670C354E4ABC9804F1746C08CA18217C32905E462E36CE3BE39E772C180E86039B2783A2EC07A28FB5C55DF06F4C52C9DE2BCBF6955817183995497CEA956AE515D2261898FA051015728E5A8AACAA68FFFFFFFFFFFFFFFF
-    g = 2
-
-    params_numbers = dh.DHParameterNumbers(p, g)
-    parameters = params_numbers.parameters(default_backend())
-
-    serversocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    # bind the socket to a public host, and a well-known port
-    serversocket.bind(("localhost", 12348))
-    # become a server socket
-    serversocket.listen(1)
-
-    clientsocket, address = serversocket.accept()
-
-    private_key = parameters.generate_private_key()
-    public_key = private_key.public_key()
-
-    public_key_bytes = public_key.public_bytes(
-        encoding=serialization.Encoding.PEM,
-        format=serialization.PublicFormat.SubjectPublicKeyInfo
-    )
-
-    clientsocket.sendall(public_key_bytes)
-
-    public_key_bytes = clientsocket.recv(2048)
-
-    clientsocket.sendall("a".encode())
-
-    serversocket.close()
-
-    received_public_key = serialization.load_pem_public_key(public_key_bytes, backend=default_backend())
-
-    shared_secret = private_key.exchange(received_public_key)
-
-    # Derive a key from the shared secret using a key derivation function (KDF)
-    derived_key = HKDF(
-        algorithm=hashes.SHA256(),
-        length=32,
-        salt=None,
-        info=b'handshake data',
-    ).derive(shared_secret)
-
-    # Use the key material to generate a Fernet key
-    modbus_secret_key = base64.urlsafe_b64encode(derived_key)
-
-    # -------------------------------------------------#
-
-    loop.create_task(handle_simulation_communication(context))
-    loop.run_until_complete(modbus_server_thread(context))
-
-    return
-
-
 async def handle_simulation_communication(context: ModbusServerContext) -> None:
     """Takes data from queue and sends to client"""
     global last_acquired_switch
     global switch_status
     global modbus_data_queue
-    global modbus_secret_key
     global arrival_file_version
     global departure_file_version
     global file_secret_key
@@ -1235,7 +1172,7 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
     loop.create_task(update_arrival())
 
     # wait so we have time to update the json files
-    await asyncio.sleep(2)
+    await asyncio.sleep(1)
 
     await train_match()
 
@@ -1256,6 +1193,7 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
             modbus_data_queue.put(["T", d_train['TrackAtLocation'], "O"])
             modbus_data_queue.put(["C", d_train['TrackAtLocation']])
             await track_semaphore.acquire()
+            await train_in_station_semaphore.acquire()
         else:
             if success:
                 break
@@ -1287,6 +1225,53 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
             await asyncio.sleep(1)  # Wait for a while before retrying
 
     _logger.info("Connected to asyncio server")
+
+    # -------------------------------------------------#
+    p = 0xFFFFFFFFFFFFFFFFC90FDAA22168C234C4C6628B80DC1CD129024E088A67CC74020BBEA63B139B22514A08798E3404DDEF9519B3CD3A431B302B0A6DF25F14374FE1356D6D51C245E485B576625E7EC6F44C42E9A637ED6B0BFF5CB6F406B7EDEE386BFB5A899FA5AE9F24117C4B1FE649286651ECE45B3DC2007CB8A163BF0598DA48361C55D39A69163FA8FD24CF5F83655D23DCA3AD961C62F356208552BB9ED529077096966D670C354E4ABC9804F1746C08CA18217C32905E462E36CE3BE39E772C180E86039B2783A2EC07A28FB5C55DF06F4C52C9DE2BCBF6955817183995497CEA956AE515D2261898FA051015728E5A8AACAA68FFFFFFFFFFFFFFFF
+    g = 2
+
+    params_numbers = dh.DHParameterNumbers(p, g)
+    parameters = params_numbers.parameters(default_backend())
+
+    private_key = parameters.generate_private_key()
+    public_key = private_key.public_key()
+
+    public_key_bytes = public_key.public_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo
+    )
+
+    writer.write(public_key_bytes)
+    await writer.drain()
+
+    public_key_bytes = await reader.read(2048)
+
+    received_public_key = serialization.load_pem_public_key(public_key_bytes, backend=default_backend())
+
+    shared_secret = private_key.exchange(received_public_key)
+
+    # Derive a key from the shared secret using a key derivation function (KDF)
+    derived_key = HKDF(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=None,
+        info=b'handshake data',
+    ).derive(shared_secret)
+
+    # Use the key material to generate a Fernet key
+    modbus_secret_key = base64.urlsafe_b64encode(derived_key)
+    # -------------------------------------------------#
+
+
+
+
+
+
+
+
+
+
+
 
     while True:
         # Run blocking call in executor so all the other tasks can run and the server
