@@ -50,6 +50,7 @@ departure_file_mutex = asyncio.Lock()
 mutex = multiprocessing.Lock()
 
 last_acquired_switch = datetime.now() - timedelta(minutes=3)
+
 departure_event = asyncio.Event()
 arrival_event = asyncio.Event()
 serving_departure = asyncio.Event()
@@ -92,6 +93,9 @@ file_secret_key = Fernet.generate_key()
 
 # TODO remove tls from modbus?. We can't have a man in the middle otherwise because the packets will be encrypted
 # TODO otherwise we have to spam the modbus server and try to change the values that way instead which modbus won't like
+
+
+# TODO: we can have put in a request for the switch and is waiting in the switch queue. If we remove the train we will still have the request even though the train doesnt exist 
 
 class Users(UserMixin):
     def __init__(self, username, password, is_active=True):
@@ -402,7 +406,7 @@ async def update_departure() -> None:
                     <OR>
                         <AND>
                             <GT name='AdvertisedTimeAtLocation' value='$dateadd(00:00:00)' /> 
-                            <LT name='AdvertisedTimeAtLocation' value='$dateadd(18:00:00)' />
+                            <LT name='AdvertisedTimeAtLocation' value='$dateadd(06:00:00)' />
                         </AND>
                         <GT name='EstimatedTimeAtLocation' value='$now' />
                     </OR>
@@ -546,7 +550,7 @@ async def update_arrival() -> None:
                                 <OR>
                                     <AND>
                                         <GT name='AdvertisedTimeAtLocation' value='$dateadd(00:00:00)' /> 
-                                        <LT name='AdvertisedTimeAtLocation' value='$dateadd(18:00:00)' />
+                                        <LT name='AdvertisedTimeAtLocation' value='$dateadd(06:00:00)' />
                                     </AND>
                                     <GT name='EstimatedTimeAtLocation' value='$now' />
                                 </OR>
@@ -797,7 +801,7 @@ async def arrival() -> None:
                     continue
 
                 # Send an update that the train has now arrived
-                modbus_data_queue.put(["a", first_entry['TrackAtLocation']])
+                modbus_data_queue.put(["a", first_entry['id'], first_entry['TrackAtLocation']])
 
                 # remove train from pending arrivals
                 del json_data[0]
@@ -928,7 +932,9 @@ async def update_departure_time(id: str, est_time: datetime, has_changed: bool) 
         datetime.strptime(departure_data[corresponding_depart_index]["EstimatedTime"], "%Y-%m-%d %H:%M"))
 
     # Check if the estimated time needs to be updated
-    if (not has_changed and est_time > departure_data[corresponding_depart_index]['EstimatedTime'] - 2) or (has_changed and est_time != departure_data[corresponding_depart_index]['EstimatedTime'] - 2):
+    if ((not has_changed and est_time > departure_data[corresponding_depart_index]['EstimatedTime'] - 2) or
+            (has_changed and est_time != departure_data[corresponding_depart_index]['EstimatedTime'] - 2)):
+
         depart_train = departure_data[corresponding_depart_index]
         depart_train['EstimatedTime'] = (est_time + timedelta(minutes=2)).strftime("%Y-%m-%d %H:%M")
 
@@ -949,12 +955,12 @@ async def update_departure_time(id: str, est_time: datetime, has_changed: bool) 
             # Update the modbus data queue for the GUI
             modbus_data_queue.put(["U", str(idx), depart_train['EstimatedTime'],
                                    depart_train['TrackAtLocation']])
-        else:
+        elif corresponding_depart_index < 4 or idx < 4:  # only do this if the entry was in the timetable before
             # Remove all entries and resend all the data again. Clear the timetable and rebuild
-            for i in range(5, -1, -1):
+            for i in range(4, -1, -1):
                 modbus_data_queue.put(["R", str(i)])
                 entries_in_gui -= 1
-            await send_new_entry()
+            send_data.set()
 
 
 # DONE
@@ -1138,10 +1144,12 @@ async def read_from_file(file_nr: int) -> Union[dict, List]:
             raise ValueError("Integrity check failed")
 
 
+# DONE
 async def acquire_switch(switch_queue: asyncio.Queue) -> None:
     """Empties the switch queue and keeps track of when the switch will be available,
     then notifies the correct function."""
     global switch_status
+    global last_acquired_switch
 
     # switch_queue should contain [func_code, track_number]  departure: 0, arrival: 1
     func_codes = [departure_event, arrival_event]
@@ -1165,17 +1173,18 @@ async def acquire_switch(switch_queue: asyncio.Queue) -> None:
                 give_up_switch.clear()
                 _logger.info("Received a wakeup call")
                 serving[int(data[0])].clear()
-                last_acquired_switch = datetime.now()
                 continue
             except asyncio.TimeoutError:
                 pass
 
             difference = last_acquired_switch + timedelta(minutes=2) - datetime.now()
 
+        last_acquired_switch = datetime.now()
+
         async with switch_lock:
             switch_status = int(data[1])
 
-        # Notify the corresponding function (departure_event or arrival_event) to acquire the switch
+        # Notify the corresponding function (departure_event or arrival_event) that they have the switch
         func_codes[int(data[0])].set()
 
         # Send an update message to the GUI
@@ -1188,8 +1197,6 @@ async def acquire_switch(switch_queue: asyncio.Queue) -> None:
             await asyncio.wait_for(give_up_switch.wait(), timeout=60)
             give_up_switch.clear()
             _logger.info("Received a wakeup call")
-            serving[int(data[0])].clear()
-            continue
         except asyncio.TimeoutError:
             pass
 
@@ -1206,6 +1213,27 @@ async def update_switch_from_gui(reader: asyncio.StreamReader) -> None:
 
         async with switch_lock:
             switch_status = int(data.decode())
+
+
+# DONE
+async def send_new_entry() -> None:
+    """Sends a new entry to the gui when there is a free place"""
+    global entries_in_gui
+
+    while True:
+        await send_data.wait()
+
+        departure_data = await read_from_file(1)
+
+        modbus_data_queue.put(
+            ['A', str(entries_in_gui), departure_data[entries_in_gui]['EstimatedTime'],
+             departure_data[entries_in_gui]['ToLocation'], departure_data[entries_in_gui]['TrackAtLocation']])
+
+        entries_in_gui += 1
+
+        if entries_in_gui == 4:
+            await departure_to_data()
+            send_data.clear()
 
 
 async def handle_simulation_communication(context: ModbusServerContext) -> None:
@@ -1237,7 +1265,6 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
 
     await asyncio.sleep(0.5)
 
-    # we then start the tasks and this process continues with the above things
     loop.create_task(update_departure())
     loop.create_task(update_arrival())
 
@@ -1354,7 +1381,7 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
 
         # ----------------- SIMULATION ----------------- #
         # a: A "status" message that a train has arrived at the station. Updates the real track status. Attack helper.
-        # Packet: ["a", track]
+        # Packet: ["a", "id", "track"]
 
         # s: helps handling the request for the switch and updates last acquired switch time.
         # Packet: ["s", func_code, "track_number"]
@@ -1400,10 +1427,8 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                 if switch_status != int(data[2]):
                     _logger.info("Updating track in json, due to switch status being different to expected track")
 
-                    async with switch_lock:
-                        modbus_data_queue.put(["u", data[1], str(switch_status)])
+                    modbus_data_queue.put(["u", data[1], str(switch_status)])
 
-                async with switch_lock:
                     modbus_data_queue.put(["H", str(switch_status)])
             case "s":
                 if data[1] == 2:
@@ -1413,31 +1438,29 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                     last_acquired_switch = datetime.now()
                     modbus_data_queue.put(["S", data[2]])
                 else:
-                    # TODO. we wont receive data[3], idx
                     _logger.info("Received switch update from simulation")
                     await switch_queue.put(data[1:])
 
                     difference = max((last_acquired_switch - datetime.now()).total_seconds(), 0)
-                    update_time = (2 * 60 * switch_queue.qsize() + 60 * (switch_queue.qsize() - 1) + difference) // 60
+                    update_time = (3 * 60 * switch_queue.qsize() + 60 * (switch_queue.qsize() - 1) + difference) // 60
 
                     if data[1] == 0:
                         _logger.info("Received switch update from departure function")
 
                         json_data = await read_from_file(1)
 
-                        json_data[data[3]]["EstimatedTime"] = (datetime.now() + timedelta(
+                        json_data[0]["EstimatedTime"] = (datetime.now() + timedelta(
                             minutes=update_time)).strftime("%Y-%m-%d %H:%M")
 
                         await write_to_file(json_data, 1)
 
-                        if data[3] < entries_in_gui:
-                            modbus_data_queue.put(["U", str(data[3]), json_data[data[3]]['EstimatedTime'],
-                                               json_data[data[3]]['TrackAtLocation']])
+                        modbus_data_queue.put(["U", str(0), json_data[0]['EstimatedTime'],
+                                               json_data[0]['TrackAtLocation']])
                     else:
                         _logger.info("Received switch update from arrival function")
 
                         json_data = await read_from_file(0)
-                        json_data[data[3]]["EstimatedTime"] = (datetime.now() + timedelta(
+                        json_data[0]["EstimatedTime"] = (datetime.now() + timedelta(
                             minutes=update_time)).strftime("%Y-%m-%d %H:%M")
                         await write_to_file(json_data, 0)
             case "r":
@@ -1445,14 +1468,13 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
 
                 entries_in_gui -= 1
 
-                if entries_in_gui < 5:
+                if entries_in_gui < 4:
                     send_data.set()
 
                 json_data = await read_from_file(0)
 
                 has_arrived = True
 
-                # TODO: the idx can be 1 and still be the first train depending on if the first entry is remvoed
                 for idx, train in enumerate(json_data):
                     if 'id' in train and train['id'] == str(data[2]):
                         has_arrived = False
@@ -1481,7 +1503,7 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
 
                         if has_arrived:
                             if switch_status != data[1]:
-                                _logger.error("Problem")
+                                _logger.error("The train derailed when it tried to leave the station")
 
                             # clear track
                             track_status_sim[data[1] - 1] = 0
@@ -1519,7 +1541,7 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
 
                 for i in range(len(json_data)):
                     if json_data[i]["id"] == data[1]:
-                        json_data[i]["TrackAtLocation"] = data[2]
+                        json_data[i]["TrackAtLocation"] = int(data[2])
                         modbus_data_queue.put(
                             ["U", str(i), json_data[i]['EstimatedTime'],
                              json_data[i]["TrackAtLocation"]])
@@ -1584,18 +1606,21 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                 await departure_to_data()
 
                 if arrival_index == 0:
+                    if serving_arrival.is_set():
+                        give_up_switch.set()
                     wake_arrival.set()
 
                 if departure_index == 0:
+                    if serving_departure.is_set():
+                        give_up_switch.set()
                     wake_departure.set()
 
-                if departure_index < 4:
-                    modbus_data_queue.put(
-                        ['A', str(departure_index), departure_data[departure_index]['EstimatedTime'],
-                         departure_data[departure_index]['ToLocation'],
-                         departure_data[departure_index]['TrackAtLocation']])
-                    entries_in_gui += 1
-                    await departure_to_data()
+                for i in range(4, -1, -1):
+                    modbus_data_queue.put(["R", str(i)])
+                    entries_in_gui -= 1
+                send_data.set()
+
+                await departure_to_data()
             case "K":
                 arrival_data = await read_from_file(0)
                 departure_data = await read_from_file(1)
@@ -1657,29 +1682,6 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                         _logger.critical("Found wrong signature in holding register")
 
 # ------------------------------- #
-
-
-
-
-
-async def send_new_entry() -> None:
-    """Sends a new entry to the gui when there is a free place"""
-    global entries_in_gui
-
-    while True:
-        await send_data.wait()
-
-        departure_data = await read_from_file(1)
-
-        modbus_data_queue.put(
-            ['A', str(entries_in_gui), departure_data[entries_in_gui]['EstimatedTime'],
-             departure_data[entries_in_gui]['ToLocation'], departure_data[entries_in_gui]['TrackAtLocation']])
-
-        entries_in_gui += 1
-
-        if entries_in_gui == 4:
-            await departure_to_data()
-            send_data.clear()
 
 
 if __name__ == '__main__':
