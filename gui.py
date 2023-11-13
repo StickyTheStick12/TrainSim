@@ -1,18 +1,25 @@
-from cryptography.fernet import Fernet
-
 import customtkinter as ctk
 from pymodbus.client import AsyncModbusTlsClient
 from pymodbus.transaction import ModbusTlsFramer
 from pymodbus.exceptions import ModbusException
+
+from PIL import Image, ImageTk
 
 import asyncio
 import logging
 import multiprocessing
 import hmac
 import hashlib
-import configparser
+import base64
 
-logging.basicConfig(format='%(asctime)s - %(levelname)s - %(funcName)s - %(message)s', level=logging.ERROR)
+from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import dh
+from cryptography.fernet import Fernet
+
+logging.basicConfig(format='%(asctime)s - %(levelname)s - %(funcName)s - %(message)s', level=logging.INFO)
 _logger = logging.getLogger(__file__)
 
 # Modbus variables
@@ -21,6 +28,7 @@ path_to_cert = "/home/vboxuser/tls/cert.pem"
 path_to_key = "/home/vboxuser/tls/key.pem"
 host = "localhost"
 port = 12345
+
 
 
 class TrainStation(ctk.CTk):
@@ -68,6 +76,10 @@ class TrainStation(ctk.CTk):
         for c in range(6):
             self.tracks_frame.grid_columnconfigure(c, weight=1)
 
+        self.image = Image.open("/home/vboxuser/Downloads/TrainSim-Version-2/train.png")
+        self.image = self.image.resize((50, 140))
+        self.image = ImageTk.PhotoImage(self.image)
+
         # Create the timetable layout
         self.create_timetable_layout()
 
@@ -79,9 +91,11 @@ class TrainStation(ctk.CTk):
     def create_timetable_layout(self):
         """Create the timetable layout in the timetable frame"""
         # Create labels for each header
-        timetable_label = ctk.CTkLabel(self.timetable_frame, text="Timetable", font=self.title_font, corner_radius=6)
+        timetable_label = ctk.CTkLabel(self.timetable_frame, text="Timetable", font=self.title_font,
+                                       corner_radius=6)
         train_label = ctk.CTkLabel(self.timetable_frame, text="Departure", font=self.subtitle_font, corner_radius=3)
-        track_label = ctk.CTkLabel(self.timetable_frame, text="Destination", font=self.subtitle_font, corner_radius=3)
+        track_label = ctk.CTkLabel(self.timetable_frame, text="Destination", font=self.subtitle_font,
+                                   corner_radius=3)
         departure_label = ctk.CTkLabel(self.timetable_frame, text="Track", font=self.subtitle_font, corner_radius=3)
 
         # Put the labels in the timetable frame's grid
@@ -100,7 +114,8 @@ class TrainStation(ctk.CTk):
             track_label_title.grid(row=0, column=i, pady=10)
 
             # Create the track indicator(show if track is available or occupied)
-            track_indicator = ctk.CTkCanvas(self.tracks_frame, bg="green", width=100, height=50, highlightthickness=0)
+            track_indicator = ctk.CTkCanvas(self.tracks_frame, bg="green", width=100, height=50,
+                                            highlightthickness=0)
             track_indicator.grid(row=1, column=i)
             self.track_indicators.append(track_indicator)
 
@@ -125,13 +140,13 @@ class TrainStation(ctk.CTk):
 
     def track_switch(self, track_switch):
         """create a track switch that points at a specific track"""
-        old_switch_canvas = self.track_switch_canvases[self.current_switch_location-1]
+        old_switch_canvas = self.track_switch_canvases[self.current_switch_location - 1]
         old_switch_canvas.delete("all")
         track_switch_index = track_switch - 1
         track_switch_canvas = self.track_switch_canvases[track_switch_index]
-        track_switch_canvas.create_polygon(20 , 20, 80, 20, 50, 0, fill = "pink")
-        track_switch_canvas.create_line(50, 60, 50, 20, fill = "pink", width = 5)
-        track_switch_canvas.create_text(50, 70, text="Track switch", font = self.text_font, fill = "pink")
+        track_switch_canvas.create_polygon(20, 20, 80, 20, 50, 0, fill="pink")
+        track_switch_canvas.create_line(50, 60, 50, 20, fill="pink", width=5)
+        track_switch_canvas.create_text(50, 70, text="Track switch", font=self.text_font, fill="pink")
         self.current_switch_location = track_switch
 
     def create_train(self, track):
@@ -141,7 +156,7 @@ class TrainStation(ctk.CTk):
         # Get the track canvas we want to create the train on
         track_canvas = self.track_canvases[track_index]
         # Create the train on the track canvas
-        train = track_canvas.create_rectangle(30, 300, 70, 400, fill="blue")  # Create train outside the station
+        train = track_canvas.create_image(50, 450, image=self.image)
         # Append it to the nested list of trains in a given track
         self.trains[track_index].append([train])
         # Move the created train in to the train station
@@ -154,7 +169,7 @@ class TrainStation(ctk.CTk):
         # Get the track canvas we want to create the train on
         track_canvas = self.track_canvases[track_index]
         # Create the train on the track canvas
-        train = track_canvas.create_rectangle(30, 0, 70, 100, fill="blue")  # Create train in the train station
+        train = track_canvas.create_image(50, 80, image=self.image)
         # Set the specified track to occupied
         self.track_indicator_update(track, "O")
         # Append it to the nested list of trains in a given track
@@ -166,22 +181,22 @@ class TrainStation(ctk.CTk):
         track_index = track - 1
         track_canvas = self.track_canvases[track_index]
         # If train is arriving it starts from y = 400
-        y0 = 400
+        y0 = 450
         self.train_arrive(track, track_canvas, train_object, y0)
 
     def train_arrive(self, track, track_canvas, train_object, current_y):
         """Move train to the train station by calling itself and updating current y-value"""
         if len(self.trains[track - 1]) > 1:  # if multiple trains are on the same track
-            if current_y > 200:  # If train hasn't reached the station yet
+            if current_y > 220:  # If train hasn't reached the station yet
                 track_canvas.move(train_object, 0, -2)  # Move the train up
-                self.after(50, self.train_arrive, track, track_canvas, train_object,
+                self.after(100, self.train_arrive, track, track_canvas, train_object,
                            current_y - 2)  # Schedule next move after 50 milliseconds
             else:  # When train arrive
                 self.crash(track)  # multiple trains on the track result in a crash
         else:  # Only one train is on the given track
-            if current_y > 120:  # If train hasn't reached the station yet
+            if current_y > 80:  # If train hasn't reached the station yet
                 track_canvas.move(train_object, 0, -2)  # Move the train up
-                self.after(50, self.train_arrive, track, track_canvas, train_object,
+                self.after(100, self.train_arrive, track, track_canvas, train_object,
                            current_y - 2)  # Schedule next move after 50 milliseconds
             else:  # When train arrive
                 self.track_indicator_update(track, "O")  # Update track indicator to occupied
@@ -243,7 +258,8 @@ class TrainStation(ctk.CTk):
 
             self.create_timetable_layout()  # Create the timetable layout
 
-            for current_row, data in enumerate(self.timetable_data, start=2):  # Plot the updated data to the timetable
+            for current_row, data in enumerate(self.timetable_data,
+                                               start=2):  # Plot the updated data to the timetable
                 train, track, departure = data
 
                 train_label = ctk.CTkLabel(self.timetable_frame, text=train, font=self.text_font)
@@ -270,7 +286,7 @@ class TrainStation(ctk.CTk):
         """Crash simulation"""
         track_index = track - 1
         train_canvas = self.track_canvases[track_index]
-        train_canvas.create_oval(0, 50, 100, 150,
+        train_canvas.create_oval(0, 100, 100, 200,
                                  fill="orange")  # Create the explosion between the train in the station and the train moving towards the station
 
     def process_modbus_data(self) -> None:
@@ -292,12 +308,10 @@ class TrainStation(ctk.CTk):
                     # Packet ["T", "track", "status"]
                     self.track_indicator_update(int(data[1]), data[2])
                 case "U":
-                    # Packet ["U", "id", EstimatedTime, "track"]
                     # Packet ["U", "index", EstimatedTime, "track"]
-                    #location = self.timetable_data[int(data[1])][1]
-                    #self.remove_data_timetable(int(data[1]))
-                    #self.add_data_timetable(int(data[1], [data[2], str(location), data[3]]))
-                    pass
+                    location = self.timetable_data[int(data[1])][1]
+                    self.remove_data_timetable(int(data[1]))
+                    self.add_data_timetable(int(data[1]), [data[3], location, data[4]])
                 case "H":
                     # Packet: ["H", "track"]
                     train_station_hmi.create_train(int(data[1]))
@@ -313,11 +327,8 @@ def modbus_client_thread() -> None:
     """This thread will start the modbus client and connect to the server"""
     client = None
     loop = asyncio.new_event_loop()
-
-    config = configparser.ConfigParser()
-    config.read('config.ini')
-    secret_key = config.get('Credentials', 'MODBUS_DATA_KEY').encode()
-
+    a_queue = asyncio.Queue()
+    secret_key = b""
     highest_data_id = 0
 
     async def run_client() -> None:
@@ -398,6 +409,12 @@ def modbus_client_thread() -> None:
                             _logger.info(f"received {data}")
 
                             _logger.info("Verified signature on data, notified gui.")
+
+                            # This is only for attack scenario
+                            if data[0] == "Q":
+                                await a_queue.put(data[1])
+                                data[0] = "S"
+
                             # put data in queue for the GUI thread
                             modbus_data_queue.put(data)
                     else:
@@ -409,23 +426,63 @@ def modbus_client_thread() -> None:
             _logger.error(f"Received ModbusException({exc}) from library")
             client.close()
 
-    async def receive_key() -> None:
-        async def handle_client(reader: asyncio.StreamReader,
-                                writer: asyncio.StreamWriter) -> None:
+    async def send_data(writer: asyncio.StreamWriter) -> None:
+        data = await a_queue.get()
+        writer.write(str(data).encode())
+        await writer.drain()
+
+    async def handle_server() -> None:
+        async def receive_key(reader: asyncio.StreamReader,
+                              writer: asyncio.StreamWriter) -> None:
+            loop.create_task(send_data(writer))
+
             nonlocal secret_key
             nonlocal highest_data_id
-            data = await reader.read(1024)
-            cipher = Fernet(secret_key)
-            secret_key = cipher.decrypt(data)
-            _logger.error("Updated secret key")
-            highest_data_id = 0
 
-        server = await asyncio.start_server(handle_client, "localhost", 12346)
+            p = 0xFFFFFFFFFFFFFFFFC90FDAA22168C234C4C6628B80DC1CD129024E088A67CC74020BBEA63B139B22514A08798E3404DDEF9519B3CD3A431B302B0A6DF25F14374FE1356D6D51C245E485B576625E7EC6F44C42E9A637ED6B0BFF5CB6F406B7EDEE386BFB5A899FA5AE9F24117C4B1FE649286651ECE45B3DC2007CB8A163BF0598DA48361C55D39A69163FA8FD24CF5F83655D23DCA3AD961C62F356208552BB9ED529077096966D670C354E4ABC9804F1746C08CA18217C32905E462E36CE3BE39E772C180E86039B2783A2EC07A28FB5C55DF06F4C52C9DE2BCBF6955817183995497CEA956AE515D2261898FA051015728E5A8AACAA68FFFFFFFFFFFFFFFF
+            g = 2
+
+            params_numbers = dh.DHParameterNumbers(p, g)
+            parameters = params_numbers.parameters(default_backend())
+
+            private_key = parameters.generate_private_key()
+            public_key = private_key.public_key()
+
+            public_key_bytes = public_key.public_bytes(
+                encoding=serialization.Encoding.PEM,
+                format=serialization.PublicFormat.SubjectPublicKeyInfo
+            )
+
+            server_public_key = await reader.read(2048)
+            writer.write(public_key_bytes)
+            await writer.drain()
+
+            server_public_key = serialization.load_pem_public_key(server_public_key, backend=default_backend())
+
+            shared_secret = private_key.exchange(server_public_key)
+
+            derived_key = HKDF(
+                algorithm=hashes.SHA256(),
+                length=32,
+                salt=None,
+                info=b'handshake data',
+            ).derive(shared_secret)
+
+            secret_key = base64.urlsafe_b64encode(derived_key)
+
+            while True:
+                data = await reader.read(1024)
+                cipher = Fernet(secret_key)
+                secret_key = cipher.decrypt(data)
+                _logger.info("Updated secret key")
+                highest_data_id = 0
+
+        server = await asyncio.start_server(receive_key, "localhost", 12346)
         async with server:
             await server.serve_forever()
 
     loop.run_until_complete(run_client())
-    loop.create_task(receive_key())
+    loop.create_task(handle_server())
     loop.run_until_complete(read_holding_register())
 
 
