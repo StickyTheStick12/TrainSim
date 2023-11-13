@@ -934,7 +934,8 @@ async def update_departure_time(id: str, est_time: datetime, has_changed: bool) 
 
         del departure_data[corresponding_depart_index]
 
-        idx = bisect.bisect_right(departure_data, datetime.strptime(depart_train['EstimatedTime'], "%Y-%m-%d %H:%M"))
+        temp = [datetime.strptime(item['EstimatedTime'], "%Y-%m-%d %H:%M") for item in departure_data]
+        idx = bisect.bisect_right(temp, depart_train['EstimatedTime'])
 
         departure_data.insert(idx, depart_train)
 
