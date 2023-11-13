@@ -1466,10 +1466,13 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                             if serving_arrival.is_set():
                                 give_up_switch.set()
                             elif arrival_switch_request.is_set():
-                                temp = await switch_queue.get()
+                                try:
+                                    temp = switch_queue.get_nowait()
 
-                                if temp[0] != 1:
-                                    await switch_queue.put(temp)
+                                    if temp[0] != 0:
+                                        await switch_queue.put(temp)
+                                except asyncio.QueueEmpty:
+                                    pass
 
                             wake_arrival.set()
 
@@ -1609,11 +1612,29 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                 if arrival_index == 0:
                     if serving_arrival.is_set():
                         give_up_switch.set()
+                    elif arrival_switch_request.is_set():
+                        try:
+                            temp = switch_queue.get_nowait()
+
+                            if temp[0] != 0:
+                                await switch_queue.put(temp)
+                        except asyncio.QueueEmpty:
+                            pass
+                    
                     wake_arrival.set()
 
                 if departure_index == 0:
                     if serving_departure.is_set():
                         give_up_switch.set()
+                    elif departure_switch_request.is_set():
+                        try:
+                            temp = switch_queue.get_nowait()
+
+                            if temp[0] != 0:
+                                await switch_queue.put(temp)
+                        except asyncio.QueueEmpty:
+                            pass
+                        
                     wake_departure.set()
 
                 for i in range(3, -1, -1):
