@@ -798,6 +798,8 @@ async def arrival() -> None:
                 # Send an update that the train has now arrived
                 modbus_data_queue.put(["a", first_entry['id'], first_entry['TrackAtLocation']])
 
+                json_data = await read_from_file(0)
+
                 # remove train from pending arrivals
                 del json_data[0]
                 await write_to_file(json_data, 0)
@@ -1139,14 +1141,14 @@ async def acquire_switch(switch_queue: asyncio.Queue) -> None:
         serving[int(data[0])].set()
 
         # Calculate the time difference using datetime.now() directly
-        difference = max(timedelta(0), last_acquired_switch + timedelta(minutes=2) - datetime.now())
+        difference = max(timedelta(minutes=0), last_acquired_switch + timedelta(minutes=2) - datetime.now())
 
         while difference > timedelta(minutes=0):
             _logger.info("Currently waiting for the switch to be available again")
-            _logger.info(f"Next check in {int(difference.total_seconds()) // 60} minutes")
+            _logger.info(f"Next check in {int(difference.total_seconds())} seconds")
 
             try:
-                await asyncio.wait_for(give_up_switch.wait(), timeout=max(0, difference.total_seconds() - 2 * 60))
+                await asyncio.wait_for(give_up_switch.wait(), timeout=max(0, difference.total_seconds()))
                 give_up_switch.clear()
                 _logger.info("Received a wakeup call")
                 serving[int(data[0])].clear()
@@ -1155,7 +1157,7 @@ async def acquire_switch(switch_queue: asyncio.Queue) -> None:
                 pass
 
             # Recalculate the difference after waiting
-            difference = max(timedelta(0), last_acquired_switch + timedelta(minutes=2) - datetime.now())
+            difference = max(timedelta(minutes=0), last_acquired_switch + timedelta(minutes=2) - datetime.now())
 
         # Update last_acquired_switch after the while loop
         last_acquired_switch = datetime.now()
