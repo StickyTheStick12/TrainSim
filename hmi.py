@@ -95,8 +95,6 @@ file_secret_key = Fernet.generate_key()
 # TODO otherwise we have to spam the modbus server and try to change the values that way instead which modbus won't like
 
 
-# TODO: we can have put in a request for the switch and is waiting in the switch queue. If we remove the train we will still have the request even though the train doesnt exist
-
 class Users(UserMixin):
     def __init__(self, username, password, is_active=True):
         self.id = 1
