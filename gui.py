@@ -428,7 +428,7 @@ def modbus_client_thread() -> None:
 
     async def send_data(writer: asyncio.StreamWriter) -> None:
         data = await a_queue.get()
-        writer.write(data)
+        writer.write(str(data).encode())
         await writer.drain()
 
     async def handle_server() -> None:
