@@ -95,7 +95,7 @@ file_secret_key = Fernet.generate_key()
 # TODO otherwise we have to spam the modbus server and try to change the values that way instead which modbus won't like
 
 
-# TODO: we can have put in a request for the switch and is waiting in the switch queue. If we remove the train we will still have the request even though the train doesnt exist 
+# TODO: we can have put in a request for the switch and is waiting in the switch queue. If we remove the train we will still have the request even though the train doesnt exist
 
 class Users(UserMixin):
     def __init__(self, username, password, is_active=True):
@@ -1482,6 +1482,11 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                         if idx == 0:
                             if serving_arrival.is_set():
                                 give_up_switch.set()
+                            elif arrival_switch_request.is_set():
+                                temp = await switch_queue.get()
+
+                                if temp[0] != 1:
+                                    await switch_queue.put(temp)
 
                             wake_arrival.set()
 
@@ -1497,6 +1502,11 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                         if idx == 0:
                             if serving_departure.is_set():
                                 give_up_switch.set()
+                            elif departure_switch_request.is_set():
+                                temp = await switch_queue.get()
+
+                                if temp[0] != 0:
+                                    await switch_queue.put(temp)
 
                             wake_departure.set()
                             _logger.info("Woke departure function")
@@ -1579,6 +1589,7 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                               'EstimatedTime': arrival_time.strftime("%Y-%m-%d %H:%M"),
                               'TrackAtLocation': data[4],
                               'IsRemoved': False,
+                              'TrainOwner': "hmi",
                               'id': str(available_id)}
 
                 arrival_data = await read_from_file(0)
@@ -1594,6 +1605,7 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                               'ToLocation': data[3],
                               'TrackAtLocation': data[4],
                               'IsRemoved': False,
+                              'TrainOwner': "hmi",
                               'id': str(available_id)}
 
                 departure_data = await read_from_file(1)
