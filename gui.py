@@ -247,7 +247,7 @@ class TrainStation(ctk.CTk):
             departure_label.grid(row=current_row, column=2)
 
     def remove_data_timetable(self, index):
-        """Remove a train from the timetable"""
+        """Remove a train from the timetaacble"""
 
         # If the row(index) exist in timetable
         if 0 <= index < len(self.timetable_data):
@@ -293,6 +293,7 @@ class TrainStation(ctk.CTk):
         if not modbus_data_queue.empty():
             # Don't block this thread if no data is available
             data = modbus_data_queue.get_nowait()
+            _logger.info(data)
             match data[0]:
                 case "A":
                     # Packet: ["A", "index", "EstimatedTime", "ToLocation", "Track"]
@@ -390,7 +391,7 @@ def modbus_client_thread() -> None:
 
                         # verify signature
                         calc_signature = " ".join(str(value) for value in data) + str(data_id)
-                        _logger.info(f"calcualting signature for this {calc_signature}")
+                        _logger.debug(f"calcualting signature for this {calc_signature}")
                         calc_signature = hmac.new(secret_key, calc_signature.encode(), hashlib.sha256).hexdigest()
 
                         if signature == calc_signature:
@@ -399,16 +400,15 @@ def modbus_client_thread() -> None:
                             calc_signature = hmac.new(secret_key, str(nonce).encode(), hashlib.sha256).hexdigest()
 
                             calc_signature = [ord(char) for char in calc_signature]
-                            _logger.info(calc_signature)
-                            for i in range(len(calc_signature)):
-                                await client.write_register(i, calc_signature[i], slave=1)
+                            _logger.debug(calc_signature)
+                            await client.write_registers(0x00, calc_signature)
 
-                            _logger.info("Resetting flag")
+                            _logger.debug("Resetting flag")
                             await client.write_register(datastore_size - 2, 1, slave=1)
 
-                            _logger.info(f"received {data}")
+                            _logger.debug(f"received {data}")
 
-                            _logger.info("Verified signature on data, notified gui.")
+                            _logger.debug("Verified signature on data, notified gui.")
 
                             # This is only for attack scenario
                             if data[0] == "Q":
