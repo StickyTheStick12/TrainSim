@@ -7,3 +7,4 @@ mysql
 pymodbus 3.5.4                                         
 customtkinter 5.2.0                                         
 cryptography                                                                                                                           
+aiohttp
