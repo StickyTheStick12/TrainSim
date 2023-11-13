@@ -3,6 +3,8 @@ from pymodbus.client import AsyncModbusTlsClient
 from pymodbus.transaction import ModbusTlsFramer
 from pymodbus.exceptions import ModbusException
 
+from PIL import Image, ImageTk
+
 import asyncio
 import logging
 import multiprocessing
@@ -29,222 +31,211 @@ port = 12345
 
 
 class TrainStation(ctk.CTk):
+    class TrainStation(ctk.CTk):
 
-    def __init__(self):
-        super().__init__()
-        ctk.set_appearance_mode("dark")
-        self.geometry("900x700")
-        self.title("Train station")
+        def __init__(self):
+            super().__init__()
+            ctk.set_appearance_mode("dark")
+            self.geometry("900x700")
+            self.title("Train station")
 
-        # Fonts for text
-        self.title_font = ctk.CTkFont(size=24)
-        self.subtitle_font = ctk.CTkFont(size=20)
-        self.text_font = ctk.CTkFont(size=16)
+            # Fonts for text
+            self.title_font = ctk.CTkFont(size=24)
+            self.subtitle_font = ctk.CTkFont(size=20)
+            self.text_font = ctk.CTkFont(size=16)
 
-        # Data containers
-        self.timetable_data = []
-        self.track_indicators = []
-        self.track_canvases = []
-        # nested list represent what track the train/trains are on
-        # E.g. self.trains[0] represent track 1, self.trains[1] represent track 2, etc
-        self.trains = [[], [], [], [], [], []]
-        self.track_switch_canvases = []
+            # Data containers
+            self.timetable_data = []
+            self.track_indicators = []
+            self.track_canvases = []
+            # nested list represent what track the train/trains are on
+            # E.g. self.trains[0] represent track 1, self.trains[1] represent track 2, etc
+            self.trains = [[], [], [], [], [], []]
+            self.track_switch_canvases = []
 
-        # Grid for frames in master window
-        self.grid_columnconfigure(0, weight=1)
-        self.grid_columnconfigure(1, weight=1)
-        self.grid_rowconfigure(0, weight=1)
+            # Grid for frames in master window
+            self.grid_columnconfigure(0, weight=1)
+            self.grid_columnconfigure(1, weight=1)
+            self.grid_rowconfigure(0, weight=1)
 
-        # Create the left frame that'll contain the timetable
-        self.timetable_frame = ctk.CTkFrame(self, fg_color="transparent")
-        self.timetable_frame.grid(row=0, column=0, sticky="nsew")
+            # Create the left frame that'll contain the timetable
+            self.timetable_frame = ctk.CTkFrame(self, fg_color="transparent")
+            self.timetable_frame.grid(row=0, column=0, sticky="nsew")
 
-        # Create the right frame that'll contain the tracks
-        self.tracks_frame = ctk.CTkFrame(self, fg_color="transparent")
-        self.tracks_frame.grid(row=0, column=1, sticky="nsew")
+            # Create the right frame that'll contain the tracks
+            self.tracks_frame = ctk.CTkFrame(self, fg_color="transparent")
+            self.tracks_frame.grid(row=0, column=1, sticky="nsew")
 
-        # Create the grid in the timetable frame
-        for c in range(3):
-            self.timetable_frame.grid_columnconfigure(c, weight=1)
-        for r in range(25):
-            self.timetable_frame.grid_rowconfigure(r, weight=1)
+            # Create the grid in the timetable frame
+            for c in range(3):
+                self.timetable_frame.grid_columnconfigure(c, weight=1)
+            for r in range(25):
+                self.timetable_frame.grid_rowconfigure(r, weight=1)
 
-        # Create the grid in the tracks frame
-        for c in range(6):
-            self.tracks_frame.grid_columnconfigure(c, weight=1)
+            # Create the grid in the tracks frame
+            for c in range(6):
+                self.tracks_frame.grid_columnconfigure(c, weight=1)
 
-        # Create the timetable layout
-        self.create_timetable_layout()
+            self.image = Image.open("train.png")
+            self.image = self.image.resize((50, 140))
+            self.image = ImageTk.PhotoImage(self.image)
 
-        # Create the track layout
-        self.create_track_layout()
+            # Create the timetable layout
+            self.create_timetable_layout()
 
-    def create_timetable_layout(self):
-        """Create the timetable layout in the timetable frame"""
-        # Create labels for each header
-        timetable_label = ctk.CTkLabel(self.timetable_frame, text="Timetable", font=self.title_font, corner_radius=6)
-        train_label = ctk.CTkLabel(self.timetable_frame, text="Departure", font=self.subtitle_font, corner_radius=3)
-        track_label = ctk.CTkLabel(self.timetable_frame, text="Destination", font=self.subtitle_font, corner_radius=3)
-        departure_label = ctk.CTkLabel(self.timetable_frame, text="Track", font=self.subtitle_font, corner_radius=3)
+            # Create the track layout
+            self.create_track_layout()
 
-        # Put the labels in the timetable frame's grid
-        timetable_label.grid(row=0, column=0, columnspan=3, sticky="n", pady=10)
-        train_label.grid(row=1, column=0, sticky="n", padx=20)
-        track_label.grid(row=1, column=1, sticky="n")
-        departure_label.grid(row=1, column=2, sticky="n")
+            self.current_switch_location = 1
 
-    def create_track_layout(self):
-        """Create the track layout in the tracks frame"""
-        # Each iteration is one track
-        for i in range(6):
-            # Track label for the header and put it in the tracks frame's grid
-            track_label_title = ctk.CTkLabel(self.tracks_frame, text=f"Track {i + 1}", font=self.title_font,
-                                             corner_radius=3)
-            track_label_title.grid(row=0, column=i, pady=10)
+        def create_timetable_layout(self):
+            """Create the timetable layout in the timetable frame"""
+            # Create labels for each header
+            timetable_label = ctk.CTkLabel(self.timetable_frame, text="Timetable", font=self.title_font,
+                                           corner_radius=6)
+            train_label = ctk.CTkLabel(self.timetable_frame, text="Departure", font=self.subtitle_font, corner_radius=3)
+            track_label = ctk.CTkLabel(self.timetable_frame, text="Destination", font=self.subtitle_font,
+                                       corner_radius=3)
+            departure_label = ctk.CTkLabel(self.timetable_frame, text="Track", font=self.subtitle_font, corner_radius=3)
 
-            # Create the track indicator(show if track is available or occupied)
-            track_indicator = ctk.CTkCanvas(self.tracks_frame, bg="green", width=100, height=50, highlightthickness=0)
-            track_indicator.grid(row=1, column=i)
-            self.track_indicators.append(track_indicator)
+            # Put the labels in the timetable frame's grid
+            timetable_label.grid(row=0, column=0, columnspan=3, sticky="n", pady=10)
+            train_label.grid(row=1, column=0, sticky="n", padx=20)
+            track_label.grid(row=1, column=1, sticky="n")
+            departure_label.grid(row=1, column=2, sticky="n")
 
-            # Create the track canvas, put it in the tracks frame's grid and store it in a list
-            track_canvas = ctk.CTkCanvas(self.tracks_frame, width=100, height=400, highlightthickness=0)
-            track_canvas.grid(row=2, column=i)
-            self.track_canvases.append(track_canvas)
+        def create_track_layout(self):
+            """Create the track layout in the tracks frame"""
+            # Each iteration is one track
+            for i in range(6):
+                # Track label for the header and put it in the tracks frame's grid
+                track_label_title = ctk.CTkLabel(self.tracks_frame, text=f"Track {i + 1}", font=self.title_font,
+                                                 corner_radius=3)
+                track_label_title.grid(row=0, column=i, pady=10)
 
-            # Creation of the tracks in the track canvas
-            track_width = 10
-            gap_width = 5
+                # Create the track indicator(show if track is available or occupied)
+                track_indicator = ctk.CTkCanvas(self.tracks_frame, bg="green", width=100, height=50,
+                                                highlightthickness=0)
+                track_indicator.grid(row=1, column=i)
+                self.track_indicators.append(track_indicator)
 
-            # Create each individual piece of the track, iteration 0 to 400 to fill the entire track canvas height
-            for y in range(0, 400, track_width + gap_width):
-                track_canvas.create_rectangle(10, y, 90, y + track_width, fill="grey")
+                # Create the track canvas, put it in the tracks frame's grid and store it in a list
+                track_canvas = ctk.CTkCanvas(self.tracks_frame, width=100, height=400, highlightthickness=0)
+                track_canvas.grid(row=2, column=i)
+                self.track_canvases.append(track_canvas)
 
-            # Create switch canvas for each track
-            track_switch_canvas = ctk.CTkCanvas(self.tracks_frame, width=100, height=100, highlightthickness=0,
-                                                bg=self["bg"])
-            track_switch_canvas.grid(row=3, column=i, pady=10)
-            self.track_switch_canvases.append(track_switch_canvas)
+                # Creation of the tracks in the track canvas
+                track_width = 10
+                gap_width = 5
 
-    def track_switch(self, track_switch):
-        """create a track switch that points at a specific track"""
-        track_switch_index = track_switch - 1
-        track_switch_canvas = self.track_switch_canvases[track_switch_index]
-        track_switch_canvas.create_polygon(20, 20, 80, 20, 50, 0, fill="pink")
-        track_switch_canvas.create_line(50, 60, 50, 20, fill="pink", width=5)
-        track_switch_canvas.create_text(50, 70, text="Track switch", font=self.text_font, fill="pink")
+                # Create each individual piece of the track, iteration 0 to 400 to fill the entire track canvas height
+                for y in range(0, 400, track_width + gap_width):
+                    track_canvas.create_rectangle(10, y, 90, y + track_width, fill="grey")
 
-    def create_train(self, track):
-        """Creates a train on a given track(1-6) outside the train station"""
-        # Track index in the list (0 - 5)
-        track_index = track - 1
-        # Get the track canvas we want to create the train on
-        track_canvas = self.track_canvases[track_index]
-        # Create the train on the track canvas
-        train = track_canvas.create_rectangle(30, 300, 70, 400, fill="blue")  # Create train outside the station
-        # Append it to the nested list of trains in a given track
-        self.trains[track_index].append([train])
-        # Move the created train in to the train station
-        self.move_train_to_station(track, train)
+                # Create switch canvas for each track
+                track_switch_canvas = ctk.CTkCanvas(self.tracks_frame, width=100, height=100, highlightthickness=0,
+                                                    bg=self["bg"])
+                track_switch_canvas.grid(row=3, column=i, pady=10)
+                self.track_switch_canvases.append(track_switch_canvas)
 
-    def create_train_in_station(self, track):
-        """Creates a train on a given track(1-6) positioned in the train station"""
-        # Track index in the list (0 - 5)
-        track_index = track - 1
-        # Get the track canvas we want to create the train on
-        track_canvas = self.track_canvases[track_index]
-        # Create the train on the track canvas
-        train = track_canvas.create_rectangle(30, 0, 70, 100, fill="blue")  # Create train in the train station
-        # Set the specified track to occupied
-        self.track_indicator_update(track, "O")
-        # Append it to the nested list of trains in a given track
-        self.trains[track_index].append([train])
+        def track_switch(self, track_switch):
+            """create a track switch that points at a specific track"""
+            old_switch_canvas = self.track_switch_canvases[self.current_switch_location - 1]
+            old_switch_canvas.delete("all")
+            track_switch_index = track_switch - 1
+            track_switch_canvas = self.track_switch_canvases[track_switch_index]
+            track_switch_canvas.create_polygon(20, 20, 80, 20, 50, 0, fill="pink")
+            track_switch_canvas.create_line(50, 60, 50, 20, fill="pink", width=5)
+            track_switch_canvas.create_text(50, 70, text="Track switch", font=self.text_font, fill="pink")
+            self.current_switch_location = track_switch
 
-    def move_train_to_station(self, track, train_object):
-        """Moves a given train object on a given track to the train station"""
-        # Get the given track's canvas
-        track_index = track - 1
-        track_canvas = self.track_canvases[track_index]
-        # If train is arriving it starts from y = 400
-        y0 = 400
-        self.train_arrive(track, track_canvas, train_object, y0)
+        def create_train(self, track):
+            """Creates a train on a given track(1-6) outside the train station"""
+            # Track index in the list (0 - 5)
+            track_index = track - 1
+            # Get the track canvas we want to create the train on
+            track_canvas = self.track_canvases[track_index]
+            # Create the train on the track canvas
+            train = track_canvas.create_image(50, 450, image=self.image)
+            # Append it to the nested list of trains in a given track
+            self.trains[track_index].append([train])
+            # Move the created train in to the train station
+            self.move_train_to_station(track, train)
 
-    def train_arrive(self, track, track_canvas, train_object, current_y):
-        """Move train to the train station by calling itself and updating current y-value"""
-        if len(self.trains[track - 1]) > 1:  # if multiple trains are on the same track
-            if current_y > 200:  # If train hasn't reached the station yet
-                track_canvas.move(train_object, 0, -2)  # Move the train up
-                self.after(50, self.train_arrive, track, track_canvas, train_object,
-                           current_y - 2)  # Schedule next move after 50 milliseconds
-            else:  # When train arrive
-                self.crash(track)  # multiple trains on the track result in a crash
-        else:  # Only one train is on the given track
-            if current_y > 120:  # If train hasn't reached the station yet
-                track_canvas.move(train_object, 0, -2)  # Move the train up
-                self.after(50, self.train_arrive, track, track_canvas, train_object,
-                           current_y - 2)  # Schedule next move after 50 milliseconds
-            else:  # When train arrive
-                self.track_indicator_update(track, "O")  # Update track indicator to occupied
+        def create_train_in_station(self, track):
+            """Creates a train on a given track(1-6) positioned in the train station"""
+            # Track index in the list (0 - 5)
+            track_index = track - 1
+            # Get the track canvas we want to create the train on
+            track_canvas = self.track_canvases[track_index]
+            # Create the train on the track canvas
+            train = track_canvas.create_image(50, 80, image=self.image)
+            # Set the specified track to occupied
+            self.track_indicator_update(track, "O")
+            # Append it to the nested list of trains in a given track
+            self.trains[track_index].append([train])
 
-    def move_train_from_station(self, track, train_number):
-        """Moves a given train on a given track out of the train station"""
-        # Get the given track's canvas
-        track_index = track - 1
-        track_canvas = self.track_canvases[track_index]
+        def move_train_to_station(self, track, train_object):
+            """Moves a given train object on a given track to the train station"""
+            # Get the given track's canvas
+            track_index = track - 1
+            track_canvas = self.track_canvases[track_index]
+            # If train is arriving it starts from y = 400
+            y0 = 450
+            self.train_arrive(track, track_canvas, train_object, y0)
 
-        # Get the train index from the train number
-        train_index = train_number - 1
-        train_object = self.trains[track_index][train_index]
+        def train_arrive(self, track, track_canvas, train_object, current_y):
+            """Move train to the train station by calling itself and updating current y-value"""
+            if len(self.trains[track - 1]) > 1:  # if multiple trains are on the same track
+                if current_y > 220:  # If train hasn't reached the station yet
+                    track_canvas.move(train_object, 0, -2)  # Move the train up
+                    self.after(100, self.train_arrive, track, track_canvas, train_object,
+                               current_y - 2)  # Schedule next move after 50 milliseconds
+                else:  # When train arrive
+                    self.crash(track)  # multiple trains on the track result in a crash
+            else:  # Only one train is on the given track
+                if current_y > 80:  # If train hasn't reached the station yet
+                    track_canvas.move(train_object, 0, -2)  # Move the train up
+                    self.after(100, self.train_arrive, track, track_canvas, train_object,
+                               current_y - 2)  # Schedule next move after 50 milliseconds
+                else:  # When train arrive
+                    self.track_indicator_update(track, "O")  # Update track indicator to occupied
 
-        y0 = 120
-        # Call iterative function that call itself for the sole purpose to move object
-        self.train_depart(track_index, track_canvas, train_index, train_object, y0)
+        def move_train_from_station(self, track, train_number):
+            """Moves a given train on a given track out of the train station"""
+            # Get the given track's canvas
+            track_index = track - 1
+            track_canvas = self.track_canvases[track_index]
 
-    def train_depart(self, track_index, track_canvas, train_index, train_object, current_y):
-        """Move train out of the train station by calling itself and updating current y-value"""
-        if current_y < 520:  # If train hasn't exit the station yet
-            track_canvas.move(train_object, 0, 2)  # Move the train down
-            self.after(50, self.train_depart, track_index, track_canvas, train_index, train_object,
-                       current_y + 2)  # Schedule next move after 50 milliseconds
-        else:  # When train is out of the station
-            self.track_indicator_update(track_index + 1, "A")  # Update the track indicator to available
-            self.trains = self.trains[track_index].pop(train_index)  # Remove the train from the trains list
+            # Get the train index from the train number
+            train_index = train_number - 1
+            train_object = self.trains[track_index][train_index]
 
-    def add_data_timetable(self, index, data):
-        """Add a train in the timetable"""
-        self.timetable_data.insert(index, data)
+            y0 = 120
+            # Call iterative function that call itself for the sole purpose to move object
+            self.train_depart(track_index, track_canvas, train_index, train_object, y0)
 
-        # Remove all the old data in the timetable frame
-        for obj in self.timetable_frame.winfo_children():
-            obj.grid_forget()
-        # Create the timetable layout in timetable frame
-        self.create_timetable_layout()
+        def train_depart(self, track_index, track_canvas, train_index, train_object, current_y):
+            """Move train out of the train station by calling itself and updating current y-value"""
+            if current_y < 520:  # If train hasn't exit the station yet
+                track_canvas.move(train_object, 0, 2)  # Move the train down
+                self.after(50, self.train_depart, track_index, track_canvas, train_index, train_object,
+                           current_y + 2)  # Schedule next move after 50 milliseconds
+            else:  # When train is out of the station
+                self.track_indicator_update(track_index + 1, "A")  # Update the track indicator to available
+                self.trains = self.trains[track_index].pop(train_index)  # Remove the train from the trains list
 
-        # Plot the new data in the timetable
-        for current_row, data in enumerate(self.timetable_data, start=2):
-            train, track, departure = data
-
-            train_label = ctk.CTkLabel(self.timetable_frame, text=train, font=self.text_font)
-            track_label = ctk.CTkLabel(self.timetable_frame, text=track, font=self.text_font)
-            departure_label = ctk.CTkLabel(self.timetable_frame, text=departure, font=self.text_font)
-
-            train_label.grid(row=current_row, column=0, padx=20)
-            track_label.grid(row=current_row, column=1)
-            departure_label.grid(row=current_row, column=2)
-
-    def remove_data_timetable(self, index):
-        """Remove a train from the timetable"""
-
-        # If the row(index) exist in timetable
-        if 0 <= index < len(self.timetable_data):
-            self.timetable_data.pop(index)  # Remove the data on the given index
-
-            for obj in self.timetable_frame.winfo_children():  # Wipe the frame
+        def add_data_timetable(self, index, data):
+            """Add a train in the timetable"""
+            self.timetable_data.insert(index, data)
+            # Remove all the old data in the timetable frame
+            for obj in self.timetable_frame.winfo_children():
                 obj.grid_forget()
+            # Create the timetable layout in timetable frame
+            self.create_timetable_layout()
 
-            self.create_timetable_layout()  # Create the timetable layout
-
-            for current_row, data in enumerate(self.timetable_data, start=2):  # Plot the updated data to the timetable
+            # Plot the new data in the timetable
+            for current_row, data in enumerate(self.timetable_data, start=2):
                 train, track, departure = data
 
                 train_label = ctk.CTkLabel(self.timetable_frame, text=train, font=self.text_font)
@@ -255,24 +246,48 @@ class TrainStation(ctk.CTk):
                 track_label.grid(row=current_row, column=1)
                 departure_label.grid(row=current_row, column=2)
 
-    def track_indicator_update(self, track_number, status):
-        """Update a given track's(1-6) indicator"""
-        if track_number < 1 or track_number > 6:
-            print(f"Invalid track number: {track_number}")
-            return
-        track_index = track_number - 1
-        track_status = self.track_indicators[track_index]
-        if status == "O":
-            track_status.config(bg="red")  # Set the indicator to red(occupied)
-        else:
-            track_status.config(bg="green")  # Set the indicator to green(available)
+        def remove_data_timetable(self, index):
+            """Remove a train from the timetable"""
 
-    def crash(self, track):
-        """Crash simulation"""
-        track_index = track - 1
-        train_canvas = self.track_canvases[track_index]
-        train_canvas.create_oval(0, 50, 100, 150,
-                                 fill="orange")  # Create the explosion between the train in the station and the train moving towards the station
+            # If the row(index) exist in timetable
+            if 0 <= index < len(self.timetable_data):
+                self.timetable_data.pop(index)  # Remove the data on the given index
+
+                for obj in self.timetable_frame.winfo_children():  # Wipe the frame
+                    obj.grid_forget()
+
+                self.create_timetable_layout()  # Create the timetable layout
+
+                for current_row, data in enumerate(self.timetable_data,
+                                                   start=2):  # Plot the updated data to the timetable
+                    train, track, departure = data
+
+                    train_label = ctk.CTkLabel(self.timetable_frame, text=train, font=self.text_font)
+                    track_label = ctk.CTkLabel(self.timetable_frame, text=track, font=self.text_font)
+                    departure_label = ctk.CTkLabel(self.timetable_frame, text=departure, font=self.text_font)
+
+                    train_label.grid(row=current_row, column=0, padx=20)
+                    track_label.grid(row=current_row, column=1)
+                    departure_label.grid(row=current_row, column=2)
+
+        def track_indicator_update(self, track_number, status):
+            """Update a given track's(1-6) indicator"""
+            if track_number < 1 or track_number > 6:
+                print(f"Invalid track number: {track_number}")
+                return
+            track_index = track_number - 1
+            track_status = self.track_indicators[track_index]
+            if status == "O":
+                track_status.config(bg="red")  # Set the indicator to red(occupied)
+            else:
+                track_status.config(bg="green")  # Set the indicator to green(available)
+
+        def crash(self, track):
+            """Crash simulation"""
+            track_index = track - 1
+            train_canvas = self.track_canvases[track_index]
+            train_canvas.create_oval(0, 100, 100, 200,
+                                     fill="orange")  # Create the explosion between the train in the station and the train moving towards the station
 
     def process_modbus_data(self) -> None:
         if not modbus_data_queue.empty():
@@ -287,7 +302,8 @@ class TrainStation(ctk.CTk):
                     self.track_switch(int(data[1]))
                 case "R":
                     # Packet ["R", "index"]
-                    self.move_train_to_station(int(data[1]), 1)
+                    self.move_train_from_station(int(data[1]), 1)
+                    self.remove_data_timetable(int(data[2]))
                 case "T":
                     # Packet ["T", "track", "status"]
                     self.track_indicator_update(int(data[1]), data[2])
@@ -312,7 +328,7 @@ def modbus_client_thread() -> None:
     client = None
     loop = asyncio.new_event_loop()
     a_queue = asyncio.Queue()
-    secret_key = ""
+    secret_key = b""
     highest_data_id = 0
 
     async def run_client() -> None:
