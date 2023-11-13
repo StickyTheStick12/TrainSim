@@ -1143,11 +1143,11 @@ async def acquire_switch(switch_queue: asyncio.Queue) -> None:
         serving[int(data[0])].set()
 
         # Arrival and departure don't have precedence over each other, so if anyone has acquired the switch, wait
-        difference = last_acquired_switch + timedelta(minutes=2) - datetime.now()
+        difference = max(timedelta(0), last_acquired_switch + timedelta(minutes=2) - datetime.now())
 
         while difference > timedelta(minutes=0):
             _logger.info("Currently waiting for the switch to be available again")
-            _logger.info(f"next check in {difference.total_seconds() % 60} minutes")
+            _logger.info(f"next check in {int(difference.total_seconds()) % 60} minutes")
 
             try:
                 await asyncio.wait_for(give_up_switch.wait(), timeout=max(0, difference.total_seconds() - 2 * 60))
@@ -1158,7 +1158,7 @@ async def acquire_switch(switch_queue: asyncio.Queue) -> None:
             except asyncio.TimeoutError:
                 pass
 
-            difference = last_acquired_switch + timedelta(minutes=2) - datetime.now()
+            difference = max(timedelta(0), last_acquired_switch + timedelta(minutes=2) - datetime.now())
 
             if difference <= timedelta(minutes=2):
                 break
@@ -1433,7 +1433,7 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                         json_data = await read_from_file(1)
 
                         json_data[0]["EstimatedTime"] = (datetime.now() + timedelta(
-                            minutes=update_time)).strftime("%Y-%m-%d %H:%M")
+                            minutes=update_time) - timedelta(minutes=1)).strftime("%Y-%m-%d %H:%M")
 
                         await write_to_file(json_data, 1)
 
@@ -1444,7 +1444,7 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
 
                         json_data = await read_from_file(0)
                         json_data[0]["EstimatedTime"] = (datetime.now() + timedelta(
-                            minutes=update_time)).strftime("%Y-%m-%d %H:%M")
+                            minutes=update_time) - timedelta(minutes=1)).strftime("%Y-%m-%d %H:%M")
                         await write_to_file(json_data, 0)
             case "r":
                 _logger.info("Received removal wish")
@@ -1473,7 +1473,7 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
 
                             wake_arrival.set()
 
-                        train['IsDeleted'] = True
+                        train['IsRemoved'] = True
                         json_data.append(json_data.pop(idx))
                         await write_to_file(json_data, 0)
                         break
@@ -1511,7 +1511,7 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                         else:
                             modbus_data_queue.put(["B", str(idx)])
 
-                        train['IsDeleted'] = True
+                        train['IsRemoved'] = True
                         json_data.append(json_data.pop(idx))
                         await write_to_file(json_data, 1)
                         await departure_to_data()
@@ -1583,8 +1583,8 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
 
                 arrival_data = await read_from_file(0)
 
-                existing_times = [item['EstimatedTime'] for item in arrival_data]
-                arrival_index = bisect.bisect_left(existing_times, train_data['EstimatedTime'])
+                existing_times = [datetime.strptime(item['EstimatedTime'], "%Y-%m-%d %H:%M") for item in arrival_data]
+                arrival_index = bisect.bisect_left(existing_times, datetime.strptime(train_data['EstimatedTime'], "%Y-%m-%d %H:%M"))
                 arrival_data.insert(arrival_index, train_data)
 
                 await write_to_file(arrival_data, 0)
@@ -1599,8 +1599,8 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
 
                 departure_data = await read_from_file(1)
 
-                existing_times = [item['EstimatedTime'] for item in departure_data]
-                departure_index = bisect.bisect_left(existing_times, train_data['EstimatedTime'])
+                existing_times = [datetime.strptime(item['EstimatedTime'], "%Y-%m-%d %H:%M") for item in departure_data]
+                departure_index = bisect.bisect_left(existing_times, datetime.strptime(train_data['EstimatedTime'], "%Y-%m-%d %H:%M"))
                 departure_data.insert(departure_index, train_data)
 
                 await write_to_file(departure_data, 1)
