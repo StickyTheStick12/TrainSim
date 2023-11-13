@@ -859,7 +859,7 @@ async def departure() -> None:
 
                     await asyncio.sleep(max(0, wait.total_seconds()))
                     _logger.info("Train is late, leaving in 20 seconds")
-                    await asyncio.sleep(20)
+
 
                     if wake_departure.is_set():
                         _logger.debug("Function has been woken")
@@ -869,7 +869,8 @@ async def departure() -> None:
 
                     # Put a message in the modbus_data_queue to indicate train departure
                     modbus_data_queue.put(["r", int(first_entry["TrackAtLocation"]), first_entry['id']])
-                    await asyncio.sleep(3)
+                    # give it some time to leave the station
+                    await asyncio.sleep(20)
                     give_up_switch.set()
                     await departure_to_data()
                 else:
@@ -1127,27 +1128,22 @@ async def read_from_file(file_nr: int) -> Union[dict, List]:
 
 
 async def acquire_switch(switch_queue: asyncio.Queue) -> None:
-    """Empties the switch queue and keeps track of when the switch will be available,
-    then notifies the correct function."""
     global switch_status
     global last_acquired_switch
 
-    # switch_queue should contain [func_code, track_number]  departure: 0, arrival: 1
     func_codes = [departure_event, arrival_event]
     serving = [serving_departure, serving_arrival]
 
     while True:
-        # Wait until a request to change the switch status has arrived
         data = await switch_queue.get()
-
         serving[int(data[0])].set()
 
-        # Arrival and departure don't have precedence over each other, so if anyone has acquired the switch, wait
+        # Calculate the time difference using datetime.now() directly
         difference = max(timedelta(0), last_acquired_switch + timedelta(minutes=2) - datetime.now())
 
         while difference > timedelta(minutes=0):
             _logger.info("Currently waiting for the switch to be available again")
-            _logger.info(f"next check in {int(difference.total_seconds()) % 60} minutes")
+            _logger.info(f"Next check in {int(difference.total_seconds()) // 60} minutes")
 
             try:
                 await asyncio.wait_for(give_up_switch.wait(), timeout=max(0, difference.total_seconds() - 2 * 60))
@@ -1158,27 +1154,22 @@ async def acquire_switch(switch_queue: asyncio.Queue) -> None:
             except asyncio.TimeoutError:
                 pass
 
+            # Recalculate the difference after waiting
             difference = max(timedelta(0), last_acquired_switch + timedelta(minutes=2) - datetime.now())
 
-            if difference <= timedelta(minutes=2):
-                break
-
+        # Update last_acquired_switch after the while loop
         last_acquired_switch = datetime.now()
 
         async with switch_lock:
             switch_status = int(data[1])
 
-        # Notify the corresponding function (departure_event or arrival_event) that they have the switch
         func_codes[int(data[0])].set()
-
-        # Send an update message to the GUI
         modbus_data_queue.put(["S", str(switch_status)])
-
         await departure_to_data()
 
-        # give the train 60 seconds to arrive/depart
+        # Give the train 60 seconds to arrive/depart
         try:
-            await asyncio.wait_for(give_up_switch.wait(), timeout=60)
+            await asyncio.wait_for(give_up_switch.wait(), timeout=180)
             give_up_switch.clear()
             _logger.info("Received a wakeup call")
         except asyncio.TimeoutError:
@@ -1620,7 +1611,7 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                                 await switch_queue.put(temp)
                         except asyncio.QueueEmpty:
                             pass
-                    
+
                     wake_arrival.set()
 
                 if departure_index == 0:
@@ -1634,7 +1625,7 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                                 await switch_queue.put(temp)
                         except asyncio.QueueEmpty:
                             pass
-                        
+
                     wake_departure.set()
 
                 for i in range(3, -1, -1):
