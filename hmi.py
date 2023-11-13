@@ -791,6 +791,7 @@ async def arrival() -> None:
                     await asyncio.sleep(max(0, difference))
 
                 if wake_arrival.is_set():
+                    _logger.info("Function has been woken")
                     wake_arrival.clear()
                     give_up_switch.set()
                     continue
@@ -798,6 +799,7 @@ async def arrival() -> None:
                 # Send an update that the train has now arrived
                 modbus_data_queue.put(["a", first_entry['id'], first_entry['TrackAtLocation']])
 
+                # update the json if any changes has been made
                 json_data = await read_from_file(0)
 
                 # remove train from pending arrivals
@@ -805,7 +807,7 @@ async def arrival() -> None:
                 await write_to_file(json_data, 0)
 
                 # sleep 0.5 seconds so we can send data to the gui so it will show that the train has arrived
-                await asyncio.sleep(0.5)
+                await asyncio.sleep(2)
 
 
 async def departure() -> None:
@@ -935,7 +937,7 @@ async def update_departure_time(id: str, est_time: datetime, has_changed: bool) 
         del departure_data[corresponding_depart_index]
 
         temp = [datetime.strptime(item['EstimatedTime'], "%Y-%m-%d %H:%M") for item in departure_data]
-        idx = bisect.bisect_right(temp, depart_train['EstimatedTime'])
+        idx = bisect.bisect_right(temp, datetime.strptime(depart_train['EstimatedTime'], "%Y-%m-%d %H:%M"))
 
         departure_data.insert(idx, depart_train)
 
@@ -1437,9 +1439,12 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                         _logger.info("Received switch update from arrival function")
 
                         json_data = await read_from_file(0)
-                        json_data[0]["EstimatedTime"] = (datetime.now() + timedelta(
-                            minutes=update_time) - timedelta(minutes=1)).strftime("%Y-%m-%d %H:%M")
-                        await write_to_file(json_data, 0)
+                        n_time = (datetime.now() + timedelta(minutes=update_time) - timedelta(minutes=1))
+                        if datetime.strptime(json_data[0]["EstimatedTime"], "%Y-%m-%d %H:%M") != n_time:
+                            json_data[0]["EstimatedTime"] = n_time.strftime("%Y-%m-%d %H:%M")
+                            await write_to_file(json_data, 0)
+                            update_departure_time(json_data[0]['id'], n_time, True)
+
             case "r":
                 _logger.info("Received removal wish")
 
@@ -1475,7 +1480,6 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                         await write_to_file(json_data, 0)
                         break
 
-                _logger.info("Finished ")
                 json_data = await read_from_file(1)
 
                 for idx, train in enumerate(json_data):
@@ -1705,7 +1709,7 @@ if __name__ == '__main__':
     modbus_process.start()
 
     SQL.start()
-
+    
     app.run(ssl_context=(cert, key), debug=False, port=5001)
     SQL.closeSession()
 
