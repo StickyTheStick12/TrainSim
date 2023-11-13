@@ -394,7 +394,6 @@ def modbus_client_thread() -> None:
 
                             _logger.info("Verified signature on data, notified gui.")
 
-                            # TODO
                             # This is only for attack scenario
                             if data[0] == "Q":
                                 await a_queue.put(data[1])
