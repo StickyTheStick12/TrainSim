@@ -1441,7 +1441,7 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                         if datetime.strptime(json_data[0]["EstimatedTime"], "%Y-%m-%d %H:%M") != n_time:
                             json_data[0]["EstimatedTime"] = n_time.strftime("%Y-%m-%d %H:%M")
                             await write_to_file(json_data, 0)
-                            update_departure_time(json_data[0]['id'], n_time, True)
+                            await update_departure_time(json_data[0]['id'], n_time, True)
 
             case "r":
                 _logger.info("Received removal wish")
