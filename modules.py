@@ -75,17 +75,16 @@ def checkAuthentication():
 
 
 # Database creation code
-def start() -> None:
-    try:
-        session.sql("USE {}".format(DB_NAME)).execute()
-    except DatabaseError as de:
-        if de.errno == 1049:
-            print("Error: Database '{}' does not exist.".format(DB_NAME))
+try:
+    session.sql("USE {}".format(DB_NAME)).execute()
+except DatabaseError as de:
+    if de.errno == 1049:
+        print("Error: Database '{}' does not exist.".format(DB_NAME))
 
-            createDatabase(session, DB_NAME)
-            session.sql("USE {}".format(DB_NAME)).execute()
-            createTableUserCredentials(session)
-            createInputData(session)
-        else:
-            print("Error executing SQL command: {}".format(de))
-            raise
+        createDatabase(session, DB_NAME)
+        session.sql("USE {}".format(DB_NAME)).execute()
+        createTableUserCredentials(session)
+        createInputData(session)
+    else:
+        print("Error executing SQL command: {}".format(de))
+        raise
