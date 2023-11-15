@@ -1026,18 +1026,16 @@ async def departure_to_data():
 
     data['switchStatus'] = "Track " + str(switch_status)
 
-    # deletes data in data['trains']
-    if len(data['trains']) == 0:
-        data['trains'].append({'trainNumber': '', 'time': '', 'track': ''})
-    else:
-        data['trains'] = [data['trains'][0]]
+    # Clear existing data in data['trains']
+    data['trains'] = []
 
-    # creates new train and then gives it data based on departure file
+    # Create new trains and give them data based on departure file
     for i in range(min(len(departure_data), 4)):
-        data['trains'].append({'trainNumber': '', 'time': '', 'track': ''})
-        data['trains'][i]['trainNumber'] = departure_data[i]['ToLocation']
-        data['trains'][i]['time'] = departure_data[i]['EstimatedTime']
-        data['trains'][i]['track'] = departure_data[i]['TrackAtLocation']
+        data['trains'].append({
+            'trainNumber': departure_data[i]['ToLocation'],
+            'time': departure_data[i]['EstimatedTime'],
+            'track': departure_data[i]['TrackAtLocation']
+        })
 
     with mutex, open('data.json', 'w') as datafile:
         json.dump(data, datafile, indent=3)
