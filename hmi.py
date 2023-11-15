@@ -1245,7 +1245,7 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
     loop.create_task(update_arrival())
 
     # wait so we have time to update the json files
-    await asyncio.sleep(1)
+    await asyncio.sleep(3)
 
     await train_match()
 
