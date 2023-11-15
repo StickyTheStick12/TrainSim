@@ -528,8 +528,8 @@ async def update_departure() -> None:
         else:
             _logger.error("API response is None. Check for issues with the API call.")
 
-        _logger.info(f"Sleeping 1 hours. Next update {(datetime.now() + timedelta(hours=1)).strftime('%H:%M')}")
-        await asyncio.sleep(1 * 60 * 60)
+        _logger.info(f"Sleeping 4 hours. Next update {(datetime.now() + timedelta(minutes=40)).strftime('%H:%M')}")
+        await asyncio.sleep(40 * 60)
 
 
 async def update_arrival() -> None:
@@ -656,8 +656,8 @@ async def update_arrival() -> None:
         else:
             _logger.error("API response was None")
 
-        _logger.info(f"Sleeping 15 minutes. Next update {datetime.now() + timedelta(minutes=15):%H:%M}")
-        await asyncio.sleep(15 * 60)
+        _logger.info(f"Sleeping 10 minutes. Next update {datetime.now() + timedelta(minutes=10):%H:%M}")
+        await asyncio.sleep(10 * 60)
 
 
 async def arrival() -> None:
