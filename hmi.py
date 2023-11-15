@@ -1707,8 +1707,6 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
 if __name__ == '__main__':
     modbus_process = multiprocessing.Process(target=modbus_helper)
     modbus_process.start()
-
-    SQL.start()
     
     app.run(ssl_context=(cert, key), debug=False, port=5001)
     SQL.closeSession()
