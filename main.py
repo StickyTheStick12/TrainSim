@@ -148,11 +148,11 @@ best_time = None
 
 # case 1: can be scheduled before all the other trains
 if idx == 0:
-    # calculate how much time there is between this arrival and the next switch update. To be on the safe side we will give it 4 minutes.
-    # it should only need 3 minutes though
-    difference = merged_existing_times[0] - temp - timedelta(minutes=1)
+    # check that the train has time to arrive, the arrival time plus 1 minute to release the switch, before the next train
+    difference = merged_existing_times[0] - (temp + timedelta(minutes=1))
 
-    if difference >= timedelta(minutes=4):
+    # don't schedule them to close together
+    if difference >= timedelta(minutes=3):
         train_data = {'AdvertisedTime': advertised_arrival_time.strftime("%Y-%m-%d %H:%M"),
                       'EstimatedTime': temp.strftime("%Y-%m-%d %H:%M"),
                       'TrackAtLocation': data[4],
@@ -165,19 +165,18 @@ if idx == 0:
 if not is_found and idx != len(merged_existing_times) - 1:
     for _idx in range(len(merged_existing_times[idx:]) - 1):
         if merged_existing_times[_idx] + timedelta(minutes=1) - merged_existing_times[_idx + 1] - timedelta(
-                minutes=2) > timedelta(minutes=4):
-            if merged_existing_times[_idx] + timedelta(minutes=1) >= timedelta(minutes=4):
-                temp = merged_existing_times[_idx] + timedelta(minutes=1)
+                minutes=2) > timedelta(minutes=3):
+            temp = merged_existing_times[_idx] + timedelta(minutes=1)
 
-                train_data = {'AdvertisedTime': advertised_arrival_time.strftime("%Y-%m-%d %H:%M"),
-                              'EstimatedTime': temp.strftime("%Y-%m-%d %H:%M"),
-                              'TrackAtLocation': data[4],
-                              'IsRemoved': False,
-                              'TrainOwner': "hmi",
-                              'id': str(available_id)}
-                merged_existing_times.insert(_idx, train_data)
-                is_found = True
-                break
+            train_data = {'AdvertisedTime': advertised_arrival_time.strftime("%Y-%m-%d %H:%M"),
+                          'EstimatedTime': temp.strftime("%Y-%m-%d %H:%M"),
+                          'TrackAtLocation': data[4],
+                          'IsRemoved': False,
+                          'TrainOwner': "hmi",
+                          'id': str(available_id)}
+            merged_existing_times.insert(_idx, train_data)
+            is_found = True
+            break
 
 if not is_found:
     temp = merged_existing_times[-1] + timedelta(minutes=1)
@@ -189,7 +188,6 @@ if not is_found:
                   'TrainOwner': "hmi",
                   'id': str(available_id)}
     merged_existing_times.append(train_data)
-    is_found = True
 
 await write_to_file(arrival_data, 0)
 
