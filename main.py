@@ -336,31 +336,70 @@ await write_to_file(arrival_data, 0)
                 await departure_to_data()
 
 
-import hashlib
-import random
+case "K":
+                arrival_data = await read_from_file(0)
+                departure_data = await read_from_file(1)
+                departure_file_version = 0
+                arrival_file_version = 0
 
+                if rotation == 3:
+                    # we will now send a new diffie hellman key
+                    writer.write("D".encode())
+                    await writer.drain()
 
-def choose_characters(input_str, num_chars):
-    hash_object = hashlib.sha256(input_str.encode())
-    hash_hex = hash_object.hexdigest()
+                    p = 0xFFFFFFFFFFFFFFFFC90FDAA22168C234C4C6628B80DC1CD129024E088A67CC74020BBEA63B139B22514A08798E3404DDEF9519B3CD3A431B302B0A6DF25F14374FE1356D6D51C245E485B576625E7EC6F44C42E9A637ED6B0BFF5CB6F406B7EDEE386BFB5A899FA5AE9F24117C4B1FE649286651ECE45B3DC2007CB8A163BF0598DA48361C55D39A69163FA8FD24CF5F83655D23DCA3AD961C62F356208552BB9ED529077096966D670C354E4ABC9804F1746C08CA18217C32905E462E36CE3BE39E772C180E86039B2783A2EC07A28FB5C55DF06F4C52C9DE2BCBF6955817183995497CEA956AE515D2261898FA051015728E5A8AACAA68FFFFFFFFFFFFFFFF
+                    g = 2
 
-    indexes = list(range(len(hash_hex) // 2))
+                    params_numbers = dh.DHParameterNumbers(p, g)
+                    parameters = params_numbers.parameters(default_backend())
 
-    random.seed(int(hash_hex[:16], 16))  # Use the first 16 characters of the hash as the seed
-    selected_indexes = random.choices(indexes, k=num_chars)
-    result = [hash_hex[i * 2: (i + 1) * 2] for i in selected_indexes]
+                    private_key = parameters.generate_private_key()
+                    public_key = private_key.public_key()
 
-    return result
+                    public_key_bytes = public_key.public_bytes(
+                        encoding=serialization.Encoding.PEM,
+                        format=serialization.PublicFormat.SubjectPublicKeyInfo
+                    )
 
-# if input string is even pick every fourth character. After that add the 7th character to the string.
-# if the string contains an a pick the second last character
-# if the last character is g add an a to the seed.
-# if the input string is odd pick the first three characters followed by the every 5th character.
+                    writer.write(public_key_bytes)
+                    await writer.drain()
 
+                    public_key_bytes = await reader.read(2048)
 
-# Example usage
-input_str = "example_input"
-num_chars = 5
-result = choose_characters(input_str, num_chars)
-print(result)
+                    # can just reuse the generated key as our challenge
+                    writer.write(data[1])
+                    await writer.drain()
+
+                    secret = choose_characters(data[1])
+
+                    received_public_key = serialization.load_pem_public_key(public_key_bytes, backend=default_backend())
+
+                    shared_secret = private_key.exchange(received_public_key)
+
+                    shared_secret += secret.encode()
+
+                    # Derive a key from the shared secret using a key derivation function (KDF)
+                    derived_key = HKDF(
+                        algorithm=hashes.SHA256(),
+                        length=32,
+                        salt=None,
+                        info=b'handshake data',
+                    ).derive(shared_secret)
+
+                    # Use the key material to generate a Fernet key
+                    modbus_secret_key = base64.urlsafe_b64encode(derived_key)
+
+                else:
+                    modbus_secret_key = data[1]
+                    writer.write(data[3])
+                    await writer.drain()
+                    _logger.info("sent new secret key")
+
+                sequence_number = 0
+
+                file_secret_key = data[2]
+                await write_to_file(arrival_data, 0)
+                await write_to_file(departure_data, 1)
+                _logger.info("updated HMAC in files")
+                rotation += 1
 
