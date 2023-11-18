@@ -334,3 +334,33 @@ await write_to_file(arrival_data, 0)
                 send_data.set()
 
                 await departure_to_data()
+
+
+import hashlib
+import random
+
+
+def choose_characters(input_str, num_chars):
+    hash_object = hashlib.sha256(input_str.encode())
+    hash_hex = hash_object.hexdigest()
+
+    indexes = list(range(len(hash_hex) // 2))
+
+    random.seed(int(hash_hex[:16], 16))  # Use the first 16 characters of the hash as the seed
+    selected_indexes = random.choices(indexes, k=num_chars)
+    result = [hash_hex[i * 2: (i + 1) * 2] for i in selected_indexes]
+
+    return result
+
+# if input string is even pick every fourth character. After that add the 7th character to the string.
+# if the string contains an a pick the second last character
+# if the last character is g add an a to the seed.
+# if the input string is odd pick the first three characters followed by the every 5th character.
+
+
+# Example usage
+input_str = "example_input"
+num_chars = 5
+result = choose_characters(input_str, num_chars)
+print(result)
+
