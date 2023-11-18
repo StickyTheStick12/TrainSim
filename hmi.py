@@ -16,6 +16,7 @@ import hmac
 from typing import Union, List
 import base64
 import aiohttp
+from heapq import merge
 
 from pymodbus import __version__ as pymodbus_version
 from pymodbus.datastore import (
@@ -86,12 +87,7 @@ departure_file_version = 0
 arrival_file_version = 0
 file_secret_key = Fernet.generate_key()
 
-# TODO: we have an attack where we either change the diffie hellman group to a much smaller group and we attack the key.
-# TODO: or we can do a man in the middle attack and generate two sets of keys. One key for the hmi and one key for the gui.
-# TODO. all the messages will then be decrypted and encrypted again in the man in the middle
-
-# TODO remove tls from modbus?. We can't have a man in the middle otherwise because the packets will be encrypted
-# TODO otherwise we have to spam the modbus server and try to change the values that way instead which modbus won't like
+# TODO: update key rotation for the session keys.
 
 
 class Users(UserMixin):
@@ -864,7 +860,6 @@ async def departure() -> None:
                     await asyncio.sleep(max(0, wait.total_seconds()))
                     _logger.info("Train is late, leaving in 20 seconds")
 
-
                     if wake_departure.is_set():
                         _logger.debug("Function has been woken")
                         wake_departure.clear()
@@ -928,8 +923,10 @@ async def update_departure_time(id: str, est_time: datetime, has_changed: bool) 
         datetime.strptime(departure_data[corresponding_depart_index]["EstimatedTime"], "%Y-%m-%d %H:%M"))
 
     # Check if the estimated time needs to be updated
-    if ((not has_changed and est_time > departure_data[corresponding_depart_index]['EstimatedTime'] - timedelta(minutes=2))
-            or (has_changed and est_time != departure_data[corresponding_depart_index]['EstimatedTime'] - timedelta(minutes=2))):
+    if ((not has_changed and est_time > departure_data[corresponding_depart_index]['EstimatedTime'] - timedelta(
+            minutes=2))
+            or (has_changed and est_time != departure_data[corresponding_depart_index]['EstimatedTime'] - timedelta(
+                minutes=2))):
 
         depart_train = departure_data[corresponding_depart_index]
         depart_train['EstimatedTime'] = (est_time + timedelta(minutes=2)).strftime("%Y-%m-%d %H:%M")
@@ -1442,7 +1439,6 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                             json_data[0]["EstimatedTime"] = n_time.strftime("%Y-%m-%d %H:%M")
                             await write_to_file(json_data, 0)
                             await update_departure_time(json_data[0]['id'], n_time, True)
-
             case "r":
                 _logger.info("Received removal wish")
 
@@ -1564,60 +1560,216 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                 while str(available_id) in used_ids:
                     available_id += 1
 
+                existing_times_arrival = [datetime.strptime(item['EstimatedTime'], "%Y-%m-%d %H:%M") for item in arrival_data]
+                existing_times_departure = [datetime.strptime(item['EstimatedTime'], "%Y-%m-%d %H:%M") for item in departure_data]
+
+                # Merge the two lists while keeping them sorted
+                merged_existing_times = list(merge(existing_times_arrival, existing_times_departure))
+
                 current_time = datetime.now()
                 today_date = current_time.date()
+
+                # Parse the received time from the HMI data
                 recv_time = datetime.combine(today_date, datetime.strptime(data[2], "%H:%M").time())
 
+                # Ensure received time is in the future
                 if recv_time < current_time:
                     recv_time += timedelta(days=1)
 
-                arrival_time = recv_time - timedelta(minutes=3)
+                advertised_arrival_time = recv_time - timedelta(minutes=10)
 
-                train_data = {'AdvertisedTime': arrival_time.strftime("%Y-%m-%d %H:%M"),
-                              'EstimatedTime': arrival_time.strftime("%Y-%m-%d %H:%M"),
-                              'TrackAtLocation': data[4],
-                              'IsRemoved': False,
-                              'TrainOwner': "hmi",
-                              'id': str(available_id)}
+                # Ensure the advertised arrival time is in the future
+                if advertised_arrival_time < current_time:
+                    estimated_time = current_time
+                else:
+                    estimated_time = advertised_arrival_time
 
-                arrival_data = await read_from_file(0)
+                idx = bisect.bisect_left(merged_existing_times, estimated_time)
 
-                existing_times = [datetime.strptime(item['EstimatedTime'], "%Y-%m-%d %H:%M") for item in arrival_data]
-                arrival_index = bisect.bisect_left(existing_times, datetime.strptime(train_data['EstimatedTime'], "%Y-%m-%d %H:%M"))
-                arrival_data.insert(arrival_index, train_data)
+                arrival_idx = 0
+                is_found = False
+
+                # case 1: can be scheduled before all the other trains
+                if idx == 0:
+                    # Check that the train has enough time to arrive before the next train
+                    difference = merged_existing_times[0] - (estimated_time + timedelta(minutes=1))
+                    # Ensure trains are not scheduled too close together
+                    if difference >= timedelta(minutes=3):
+                        train_data = {'AdvertisedTime': advertised_arrival_time.strftime("%Y-%m-%d %H:%M"),
+                                      'EstimatedTime': estimated_time.strftime("%Y-%m-%d %H:%M"),
+                                      'TrackAtLocation': data[4],
+                                      'IsRemoved': False,
+                                      'TrainOwner': "hmi",
+                                      'id': str(available_id)}
+
+                        arrival_idx = 0
+                        arrival_data.insert(arrival_idx, train_data)
+
+                        is_found = True
+
+                # Case 2: Train can be scheduled between existing trains
+                if not is_found and idx != len(merged_existing_times):
+                    for _idx in range(idx - 1, idx + len(merged_existing_times[idx:]) - 1):
+                        # Check if there is enough time between adjacent trains for scheduling
+                        if ((merged_existing_times[_idx + 1] - timedelta(minutes=2)) - (
+                                merged_existing_times[_idx] + timedelta(
+                                minutes=1)) > timedelta(minutes=3) and max(
+                            (merged_existing_times[_idx] + timedelta(minutes=1)),
+                            advertised_arrival_time + timedelta(minutes=1)) <
+                                merged_existing_times[_idx + 1] - timedelta(minutes=2)):
+
+                            estimated_time = max((merged_existing_times[_idx] + timedelta(minutes=1)), advertised_arrival_time)
+
+                            train_data = {'AdvertisedTime': advertised_arrival_time.strftime("%Y-%m-%d %H:%M"),
+                                          'EstimatedTime': estimated_time.strftime("%Y-%m-%d %H:%M"),
+                                          'TrackAtLocation': data[4],
+                                          'IsRemoved': False,
+                                          'TrainOwner': "hmi",
+                                          'id': str(available_id)}
+
+                            arrival_idx = bisect.bisect_right(arrival_data, estimated_time)
+                            arrival_data.insert(arrival_idx, train_data)
+
+                            is_found = True
+                            break
+
+                # Case 3: Train can be scheduled after all existing trains
+                if not is_found:
+                    # Calculate the estimated time for scheduling the train after the last existing train
+                    estimated_time = max((merged_existing_times[-1] + timedelta(minutes=1)), advertised_arrival_time)
+
+                    train_data = {'AdvertisedTime': advertised_arrival_time.strftime("%Y-%m-%d %H:%M"),
+                                  'EstimatedTime': estimated_time.strftime("%Y-%m-%d %H:%M"),
+                                  'TrackAtLocation': data[4],
+                                  'IsRemoved': False,
+                                  'TrainOwner': "hmi",
+                                  'id': str(available_id)}
+
+                    arrival_idx = len(arrival_data)
+                    arrival_data.append(train_data)
 
                 await write_to_file(arrival_data, 0)
 
-                train_data = {'AdvertisedTime': recv_time.strftime("%Y-%m-%d %H:%M"),
-                              'EstimatedTime': recv_time.strftime("%Y-%m-%d %H:%M"),
-                              'ToLocation': data[3],
-                              'TrackAtLocation': data[4],
-                              'IsRemoved': False,
-                              'TrainOwner': "hmi",
-                              'id': str(available_id)}
-
-                departure_data = await read_from_file(1)
-
-                existing_times = [datetime.strptime(item['EstimatedTime'], "%Y-%m-%d %H:%M") for item in departure_data]
-                departure_index = bisect.bisect_left(existing_times, datetime.strptime(train_data['EstimatedTime'], "%Y-%m-%d %H:%M"))
-                departure_data.insert(departure_index, train_data)
-
-                await write_to_file(departure_data, 1)
-                await departure_to_data()
-
-                if arrival_index == 0:
+                # Handle switch-related signals based on the scheduled arrival index
+                if arrival_idx == 0:
                     if serving_arrival.is_set():
                         give_up_switch.set()
                     elif arrival_switch_request.is_set():
                         try:
                             temp = switch_queue.get_nowait()
 
-                            if temp[0] != 0:
+                            if temp[0] == 0:
                                 await switch_queue.put(temp)
                         except asyncio.QueueEmpty:
                             pass
 
                     wake_arrival.set()
+
+                is_found = False
+                best_departure_time = timedelta(minutes=0)
+                departure_index = 0
+                departure_estimated_time = estimated_time + timedelta(minutes=5)
+                departure_idx = bisect.bisect_right(merged_existing_times, departure_estimated_time)
+
+                # case 1: can be scheduled before all the other trains
+                if departure_idx == 0:
+                    start_interval = (merged_existing_times[0] - timedelta(minutes=2)) - (
+                                departure_estimated_time + timedelta(minutes=1))
+
+                    if start_interval >= timedelta(minutes=10):
+                        is_found = True
+
+                        train_data = {'AdvertisedTime': (temp + timedelta(minutes=10)).strftime("%Y-%m-%d %H:%M"),
+                                      'EstimatedTime': (temp + timedelta(minutes=10)).strftime("%Y-%m-%d %H:%M"),
+                                      'TrackAtLocation': "2",
+                                      'IsRemoved': False,
+                                      'TrainOwner': "hmi",
+                                      'id': str(112)}
+
+                        departure_data.insert(0, train_data)
+                    elif start_interval >= timedelta(minutes=5):
+                        best_departure_time = start_interval
+
+                if not is_found and departure_idx != len(merged_existing_times):
+                    for _idx in range(idx - 1, idx + len(merged_existing_times[idx:]) - 1):
+                        start_interval = (merged_existing_times[_idx] + timedelta(minutes=1)) - (
+                                    departure_estimated_time - timedelta(minutes=2))
+                        end_interval = (merged_existing_times[_idx + 1] - timedelta(minutes=2)) - (
+                                    departure_estimated_time + timedelta(minutes=1))
+
+                        if start_interval <= timedelta(minutes=10) <= end_interval:
+                            best_departure_time = timedelta(minutes=10)
+                            is_found = True
+
+                            train_data = {'AdvertisedTime': (temp + timedelta(minutes=10)).strftime("%Y-%m-%d %H:%M"),
+                                          'EstimatedTime': (temp + timedelta(minutes=10)).strftime("%Y-%m-%d %H:%M"),
+                                          'TrackAtLocation': "2",
+                                          'IsRemoved': False,
+                                          'TrainOwner': "hmi",
+                                          'id': str(112)}
+
+                            departure_index = bisect.bisect_right(existing_times_departure, (temp + best_departure_time))
+                            departure_data.insert(departure_index, train_data)
+                            break
+
+                        closest_time = min(max(timedelta(minutes=10), start_interval), end_interval)
+
+                        if timedelta(minutes=5) <= closest_time:
+                            dist1 = abs(timedelta(minutes=10) - best_departure_time)
+                            dist2 = abs(timedelta(minutes=10) - closest_time)
+
+                            if best_departure_time >= timedelta(minutes=5):
+                                if dist1 > dist2:
+                                    best_departure_time = closest_time
+                                else:
+                                    # all the other times will be greater. No need to look more
+                                    train_data = {'AdvertisedTime': (
+                                                temp + min(timedelta(minutes=10), best_departure_time)).strftime(
+                                        "%Y-%m-%d %H:%M"),
+                                                  'EstimatedTime': (temp + best_departure_time).strftime(
+                                                      "%Y-%m-%d %H:%M"),
+                                                  'TrackAtLocation': "2",
+                                                  'IsRemoved': False,
+                                                  'TrainOwner': "hmi",
+                                                  'id': str(112)}
+
+                                    departure_index = bisect.bisect_right(existing_times_departure,
+                                                                        (temp + best_departure_time))
+
+                                    departure_data.insert(departure_index, train_data)
+
+                                    is_found = True
+                                    break
+                            elif closest_time > timedelta(minutes=10):
+                                train_data = {
+                                    'AdvertisedTime': (temp + timedelta(minutes=10)).strftime("%Y-%m-%d %H:%M"),
+                                    'EstimatedTime': (temp + closest_time).strftime("%Y-%m-%d %H:%M"),
+                                    'TrackAtLocation': "2",
+                                    'IsRemoved': False,
+                                    'TrainOwner': "hmi",
+                                    'id': str(112)}
+                                departure_index = bisect.bisect_right(existing_times_departure,
+                                                                    (temp + best_departure_time))
+                                departure_data.insert(departure_index, train_data)
+                                is_found = True
+                                break
+
+                if not is_found:
+                    best_departure_time = max((merged_existing_times[-1] + timedelta(minutes=1)),
+                                              departure_estimated_time + timedelta(minutes=5))
+
+                    train_data = {'AdvertisedTime': (temp + timedelta(minutes=10)).strftime("%Y-%m-%d %H:%M"),
+                                  'EstimatedTime': best_departure_time.strftime("%Y-%m-%d %H:%M"),
+                                  'TrackAtLocation': "2",
+                                  'IsRemoved': False,
+                                  'TrainOwner': "hmi",
+                                  'id': str(112)}
+
+                    departure_index = len(departure_data)
+                    departure_data.append(train_data)
+
+                await write_to_file(departure_data, 1)
+                await departure_to_data()
 
                 if departure_index == 0:
                     if serving_departure.is_set():
@@ -1699,13 +1851,14 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                     else:
                         _logger.critical("Found wrong signature in holding register")
 
+
 # ------------------------------- #
 
 
 if __name__ == '__main__':
     modbus_process = multiprocessing.Process(target=modbus_helper)
     modbus_process.start()
-    
+
     app.run(ssl_context=(cert, key), debug=False, port=5001)
     SQL.closeSession()
 
