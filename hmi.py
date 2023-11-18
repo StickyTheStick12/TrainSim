@@ -17,6 +17,7 @@ from typing import Union, List
 import base64
 import aiohttp
 from heapq import merge
+import random
 
 from pymodbus import __version__ as pymodbus_version
 from pymodbus.datastore import (
@@ -62,6 +63,7 @@ wake_departure = asyncio.Event()
 give_up_switch = asyncio.Event()
 
 track_semaphore = asyncio.Semaphore(value=6)
+trains_not_checked_out = asyncio.Semaphore(value=6)
 track_status_sim = [0] * 6  # this is the track_status that the trains use when deciding on a track.
 
 switch_lock = asyncio.Lock()
@@ -384,7 +386,8 @@ def setup_server() -> ModbusServerContext:
 
 
 async def update_departure() -> None:
-    """Updates departure.json every 1 hour, won't remove anything just update with new trains"""
+    """Updates departure.json every 40 minutes, will remove all trains that IsRemoved is set to true on and
+    they don't exist in the new data from trafikverket"""
     global modbus_data_queue
 
     while True:
@@ -529,7 +532,7 @@ async def update_departure() -> None:
 
 
 async def update_arrival() -> None:
-    """Updates arrival.json every 15 minutes with new trains and update estimated time for all the trains"""
+    """Updates arrival.json every 10 minutes with new trains and update estimated time for all the trains"""
     while True:
         xml_arrival = """<REQUEST>
                     <LOGIN authenticationkey='eb2fa89aebd243cb9cba7068aac73244'/> 
@@ -958,6 +961,7 @@ async def update_departure_time(id: str, est_time: datetime, has_changed: bool) 
 
 
 async def update_keys(secret_key: bytes) -> None:
+    """updates the modbus keys and sends it to the gui"""
     new_modbus_key = Fernet.generate_key()
     new_file_key = Fernet.generate_key()
     cipher = Fernet(secret_key)
@@ -1013,6 +1017,7 @@ async def train_match() -> None:
 
 
 async def departure_to_data():
+    """Copies departure.json to data.json for the hmi"""
     departure_data = await read_from_file(1)
 
     with mutex, open('data.json', 'r') as datafile:
@@ -1128,6 +1133,7 @@ async def read_from_file(file_nr: int) -> Union[dict, List]:
 
 
 async def acquire_switch(switch_queue: asyncio.Queue) -> None:
+    """Handles delegation of switch"""
     global switch_status
     global last_acquired_switch
 
@@ -1227,6 +1233,7 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
     address = 0x00
 
     sequence_number = 0
+    rotation = 0
 
     # remove old json files
     try:
@@ -1797,11 +1804,68 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                 departure_file_version = 0
                 arrival_file_version = 0
 
-                modbus_secret_key = data[1]
+                if rotation == 3:
+                    writer.write("D".encode())
+                    await writer.drain()
+
+                    p = 0xFFFFFFFFFFFFFFFFC90FDAA22168C234C4C6628B80DC1CD129024E088A67CC74020BBEA63B139B22514A08798E3404DDEF9519B3CD3A431B302B0A6DF25F14374FE1356D6D51C245E485B576625E7EC6F44C42E9A637ED6B0BFF5CB6F406B7EDEE386BFB5A899FA5AE9F24117C4B1FE649286651ECE45B3DC2007CB8A163BF0598DA48361C55D39A69163FA8FD24CF5F83655D23DCA3AD961C62F356208552BB9ED529077096966D670C354E4ABC9804F1746C08CA18217C32905E462E36CE3BE39E772C180E86039B2783A2EC07A28FB5C55DF06F4C52C9DE2BCBF6955817183995497CEA956AE515D2261898FA051015728E5A8AACAA68FFFFFFFFFFFFFFFF
+                    g = 2
+
+                    params_numbers = dh.DHParameterNumbers(p, g)
+                    parameters = params_numbers.parameters(default_backend())
+
+                    private_key = parameters.generate_private_key()
+                    public_key = private_key.public_key()
+
+                    public_key_bytes = public_key.public_bytes(
+                        encoding=serialization.Encoding.PEM,
+                        format=serialization.PublicFormat.SubjectPublicKeyInfo
+                    )
+
+                    writer.write(public_key_bytes)
+                    await writer.drain()
+
+                    public_key_bytes = await reader.read(2048)
+
+                    # can just reuse the generated key as our challenge
+                    writer.write(data[1])
+                    await writer.drain()
+
+                    secret = choose_characters(data[1])
+                    received_public_key = serialization.load_pem_public_key(public_key_bytes, backend=default_backend())
+
+                    shared_secret = private_key.exchange(received_public_key)
+
+                    shared_secret += secret.encode()
+
+                    # Derive a key from the shared secret using a key derivation function (KDF)
+                    derived_key = HKDF(
+                        algorithm=hashes.SHA256(),
+                        length=32,
+                        salt=None,
+                        info=b'handshake data',
+                    ).derive(shared_secret)
+
+                    # Use the key material to generate a Fernet key
+                    modbus_secret_key = base64.urlsafe_b64encode(derived_key)
+
+                    expected_signature = hmac.new(modbus_secret_key, data[1], hashlib.sha256)
+
+                    recv_signature = await reader.read(1024)
+
+                    if not expected_signature == recv_signature:
+                        _logger.critical("MITM detected")
+                        raise RuntimeError
+
+                    rotation = 0
+                else:
+                    modbus_secret_key = data[1]
+                    writer.write(data[3])
+                    await writer.drain()
+                    _logger.info("sent new secret key")
+                    rotation += 1
+
                 file_secret_key = data[2]
-                writer.write(data[3])
-                await writer.drain()
-                _logger.info("sent new secret key")
                 sequence_number = 0
 
                 await write_to_file(arrival_data, 0)
@@ -1853,6 +1917,18 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
 
 
 # ------------------------------- #
+
+def choose_characters(secret: bytes) -> str:
+    hash_object = hashlib.sha256(secret)
+    hash_hex = hash_object.hexdigest()
+
+    indexes = list(range(len(hash_hex) // 2))
+
+    random.seed(int(hash_hex[:16], 16))  # Use the first 16 characters of the hash as the seed
+    selected_indexes = random.choices(indexes, k=32)
+    result = [hash_hex[i * 2: (i + 1) * 2] for i in selected_indexes]
+
+    return "".join(result)
 
 
 if __name__ == '__main__':
