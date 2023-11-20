@@ -1,5 +1,5 @@
 ## Dependencies
-aiohttp == 3.8.6
+aiohttp == 3.8.6 <br/>
 bcrypt == 3.2.0
 cryptography == 3.4.8
 customtkinter == 5.2.0
