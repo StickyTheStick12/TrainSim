@@ -11,6 +11,7 @@ import multiprocessing
 import hmac
 import hashlib
 import base64
+import random
 
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes
@@ -30,9 +31,7 @@ host = "localhost"
 port = 12345
 
 
-
 class TrainStation(ctk.CTk):
-
     def __init__(self):
         super().__init__()
         ctk.set_appearance_mode("dark")
@@ -474,8 +473,53 @@ def modbus_client_thread() -> None:
 
             while True:
                 data = await reader.read(1024)
-                cipher = Fernet(secret_key)
-                secret_key = cipher.decrypt(data)
+
+                if data.decode() == "D":
+                    p = 0xFFFFFFFFFFFFFFFFC90FDAA22168C234C4C6628B80DC1CD129024E088A67CC74020BBEA63B139B22514A08798E3404DDEF9519B3CD3A431B302B0A6DF25F14374FE1356D6D51C245E485B576625E7EC6F44C42E9A637ED6B0BFF5CB6F406B7EDEE386BFB5A899FA5AE9F24117C4B1FE649286651ECE45B3DC2007CB8A163BF0598DA48361C55D39A69163FA8FD24CF5F83655D23DCA3AD961C62F356208552BB9ED529077096966D670C354E4ABC9804F1746C08CA18217C32905E462E36CE3BE39E772C180E86039B2783A2EC07A28FB5C55DF06F4C52C9DE2BCBF6955817183995497CEA956AE515D2261898FA051015728E5A8AACAA68FFFFFFFFFFFFFFFF
+                    g = 2
+
+                    params_numbers = dh.DHParameterNumbers(p, g)
+                    parameters = params_numbers.parameters(default_backend())
+
+                    private_key = parameters.generate_private_key()
+                    public_key = private_key.public_key()
+
+                    public_key_bytes = public_key.public_bytes(
+                        encoding=serialization.Encoding.PEM,
+                        format=serialization.PublicFormat.SubjectPublicKeyInfo
+                    )
+
+                    server_public_key = await reader.read(2048)
+                    writer.write(public_key_bytes)
+                    await writer.drain()
+
+                    test = await reader.read(1024)
+
+                    secret = choose_characters(test)
+
+                    server_public_key = serialization.load_pem_public_key(server_public_key, backend=default_backend())
+
+                    shared_secret = private_key.exchange(server_public_key)
+
+                    shared_secret += secret.encode()
+
+                    derived_key = HKDF(
+                        algorithm=hashes.SHA256(),
+                        length=32,
+                        salt=None,
+                        info=b'handshake data',
+                    ).derive(shared_secret)
+
+                    secret_key = base64.urlsafe_b64encode(derived_key)
+
+                    signature = hmac.new(secret_key, test, hashlib.sha256)
+
+                    writer.write(signature)
+                    await writer.drain()
+                else:
+                    cipher = Fernet(secret_key)
+                    secret_key = cipher.decrypt(data)
+
                 _logger.info("Updated secret key")
                 highest_data_id = 0
 
@@ -486,6 +530,18 @@ def modbus_client_thread() -> None:
     loop.run_until_complete(run_client())
     loop.create_task(handle_server())
     loop.run_until_complete(read_holding_register())
+
+    def choose_characters(secret: bytes) -> str:
+        hash_object = hashlib.sha256(secret)
+        hash_hex = hash_object.hexdigest()
+
+        indexes = list(range(len(hash_hex) // 2))
+
+        random.seed(int(hash_hex[:16], 16))  # Use the first 16 characters of the hash as the seed
+        selected_indexes = random.choices(indexes, k=32)
+        result = [hash_hex[i * 2: (i + 1) * 2] for i in selected_indexes]
+
+        return "".join(result)
 
 
 if __name__ == "__main__":
