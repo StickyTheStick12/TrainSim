@@ -814,7 +814,6 @@ async def departure() -> None:
     Tries to acquire the switch so it is at the correct track and then remove the train from the list."""
     while True:
         json_data = await read_from_file(1)
-        _logger.info("read from file")
 
         if json_data:
             first_entry = json_data[0]
@@ -834,14 +833,11 @@ async def departure() -> None:
                 pass
 
 
-            _logger.info("Acquire switch")
             departure_switch_request.set()
 
             # Put a message in the modbus_data_queue to control the switch
             modbus_data_queue.put(["s", 0, first_entry['TrackAtLocation']])
 
-
-            _logger.info("Waiting")
             # Wait for the departure_event signal
             await departure_event.wait()
             departure_event.clear()
@@ -1717,12 +1713,6 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                                       'TrainOwner': "hmi",
                                       'id': str(available_id)}
 
-                        _logger.error("adding 10 minutes")
-                        _logger.error(train_data['AdvertisedTime'])
-                        _logger.error(train_data['EstimatedTime'])
-                        _logger.error(train_data['id'])
-                        _logger.error("case 1")
-
                         departure_data.insert(0, train_data)
                     elif start_interval >= timedelta(minutes=5):
                         best_departure_time = start_interval
@@ -1744,11 +1734,6 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                                           'IsRemoved': False,
                                           'TrainOwner': "hmi",
                                           'id': str(available_id)}
-
-                            _logger.error("Adding 10 minutes")
-                            _logger.error(train_data['AdvertisedTime'])
-                            _logger.error(train_data['EstimatedTime'])
-                            _logger.error(train_data['id'])
 
                             departure_index = bisect.bisect_right(existing_times_departure, (estimated_time + timedelta(minutes=10)))
                             departure_data.insert(departure_index, train_data)
@@ -1776,11 +1761,6 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                                                   'TrainOwner': "hmi",
                                                   'id': str(available_id)}
 
-                                    _logger.error("time greater than 5")
-                                    _logger.error(train_data['AdvertisedTime'])
-                                    _logger.error(train_data['EstimatedTime'])
-                                    _logger.error(train_data['id'])
-
                                     departure_index = bisect.bisect_right(existing_times_departure,
                                                                         (estimated_time + best_departure_time))
 
@@ -1797,11 +1777,6 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                                     'IsRemoved': False,
                                     'TrainOwner': "hmi",
                                     'id': str(available_id)}
-
-                                _logger.error(train_data['AdvertisedTime'])
-                                _logger.error(train_data['EstimatedTime'])
-                                _logger.error(train_data['id'])
-                                _logger.error("pIcking closest time")
 
                                 departure_index = bisect.bisect_right(existing_times_departure,
                                                                     (estimated_time + closest_time))
@@ -1820,7 +1795,7 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                                   'IsRemoved': False,
                                   'TrainOwner': "hmi",
                                   'id': str(available_id)}
-                    _logger.error("last")
+
                     departure_index = len(departure_data)
                     departure_data.append(train_data)
 
@@ -1841,7 +1816,6 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                         except asyncio.QueueEmpty:
                             pass
 
-                    _logger.info("Wake deparutre set")
                     wake_departure.set()
 
                     _logger.info(wake_departure.is_set())
