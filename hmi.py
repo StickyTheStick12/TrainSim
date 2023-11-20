@@ -890,10 +890,6 @@ async def departure() -> None:
                     modbus_data_queue.put(["r", int(first_entry["TrackAtLocation"]), first_entry['id']])
 
                     await asyncio.sleep(1.5)
-
-                    # Update the 'departure.json' file with the modified json_data
-                    await write_to_file(json_data, 1)
-                    await departure_to_data()
         else:
             _logger.error("No entry found in departure.json")
 
