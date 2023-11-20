@@ -1495,7 +1495,6 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
 
                             wake_arrival.set()
 
-                        train['IsRemoved'] = True
                         json_data.append(json_data.pop(idx))
                         await write_to_file(json_data, 0)
                         break
@@ -1535,7 +1534,8 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                             modbus_data_queue.put(["B", str(idx)])
 
                         train['IsRemoved'] = True
-                        json_data.append(json_data.pop(idx))
+                        del json_data[idx]
+                        json_data.append(train)
                         await write_to_file(json_data, 1)
                         await departure_to_data()
                         break
@@ -1563,7 +1563,7 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
 
                 for i in range(len(json_data)):
                     if json_data[i]["id"] == data[1]:
-                        json_data[i]["TrackAtLocation"] = int(data[2])
+                        json_data[i]["TrackAtLocation"] = data[2]
                         modbus_data_queue.put(
                             ["U", str(i), json_data[i]['EstimatedTime'],
                              json_data[i]["TrackAtLocation"]])
