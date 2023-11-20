@@ -1533,10 +1533,11 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                         else:
                             modbus_data_queue.put(["B", str(idx)])
 
+                        depart_data = json_data.copy()
                         train['IsRemoved'] = True
-                        del json_data[idx]
-                        json_data.append(train)
-                        await write_to_file(json_data, 1)
+                        del depart_data[idx]
+                        depart_data.append(train)
+                        await write_to_file(depart_data, 1)
                         await departure_to_data()
                         break
             case "t":
