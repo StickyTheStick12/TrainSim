@@ -1,6 +1,6 @@
 aiohttp == 3.8.6
 bcrypt == 3.2.0
-cryptography == 3.4.8
+cryptography == 41.0.5
 customtkinter == 5.2.0
 flask == 2.3.3
 flask-login == 0.6.2
