@@ -2,6 +2,11 @@ from flask import Flask, render_template, request, redirect, url_for, session, f
 from flask_login import login_user, logout_user, login_required, current_user, LoginManager, UserMixin
 import bcrypt
 
+# TODO: cant wait for swithc update at the same time we update diffie hellman key.
+
+# for the first problem we can solve it by destroying the task. Send the diffie hellman because the client has functionality for that
+# and then create the task again. If the client sends anything and doesn't get a response it will resend it again.
+
 import modules as SQL
 import bisect
 import json
@@ -221,7 +226,7 @@ def railwayPage():
                         json_data['currentTrackStatus']['1'] = track_status[0]
                         logData(json_data, "Track status changed", "Track 1 changed from Occupied to Available")
 
-                    data = ["t", 1, json_data['currentTrackStatus']['1'][0]]
+                    data = ["t", 1, json_data['currentTrackStatus']['1'][0], "-"]
                     modbus_data_queue.put(data)
 
                 case "track2":
@@ -232,7 +237,7 @@ def railwayPage():
                         json_data['currentTrackStatus']['2'] = track_status[0]
                         logData(json_data, "Track status changed", "Track 2 changed from Occupied to Available")
 
-                    data = ["t", 2, json_data['currentTrackStatus']['2'][0]]
+                    data = ["t", 2, json_data['currentTrackStatus']['2'][0], "-"]
                     modbus_data_queue.put(data)
 
                 case "track3":
@@ -243,7 +248,7 @@ def railwayPage():
                         json_data['currentTrackStatus']['3'] = track_status[0]
                         logData(json_data, "Track status changed", "Track 3 changed from Occupied to Available")
 
-                    data = ["t", 3, json_data['currentTrackStatus']['3'][0]]
+                    data = ["t", 3, json_data['currentTrackStatus']['3'][0], "-"]
                     modbus_data_queue.put(data)
 
                 case "track4":
@@ -254,7 +259,7 @@ def railwayPage():
                         json_data['currentTrackStatus']['4'] = track_status[0]
                         logData(json_data, "Track status changed", "Track 4 changed from Occupied to Available")
 
-                    data = ["t", 4, json_data['currentTrackStatus']['4'][0]]
+                    data = ["t", 4, json_data['currentTrackStatus']['4'][0], "-"]
                     modbus_data_queue.put(data)
 
                 case "track5":
@@ -265,7 +270,7 @@ def railwayPage():
                         json_data['currentTrackStatus']['5'] = track_status[0]
                         logData(json_data, "Track status changed", "Track 5 changed from Occupied to Available")
 
-                    data = ["t", 5, json_data['currentTrackStatus']['5'][0]]
+                    data = ["t", 5, json_data['currentTrackStatus']['5'][0], "-"]
                     modbus_data_queue.put(data)
 
                 case "track6":
@@ -276,7 +281,7 @@ def railwayPage():
                         json_data['currentTrackStatus']['6'] = track_status[0]
                         logData(json_data, "Track status changed", "Track 6 changed from Occupied to Available")
 
-                    data = ["t", 6, json_data['currentTrackStatus']['6'][0]]
+                    data = ["t", 6, json_data['currentTrackStatus']['6'][0], "-"]
                     modbus_data_queue.put(data)
 
         else:
@@ -773,6 +778,8 @@ async def arrival() -> None:
                         break
 
             await asyncio.sleep(0.5)
+
+            await track_semaphore.acquire()
 
             # Wait for the arrival event
             await arrival_event.wait()
@@ -1382,7 +1389,7 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
     modbus_secret_key = base64.urlsafe_b64encode(derived_key)
 
     # -------------------------------------------------#
-    loop.create_task(update_switch_from_gui(reader))
+    # loop.create_task(update_switch_from_gui(reader))
 
     while True:
         # Run blocking call in executor so all the other tasks can run and the server
@@ -1570,7 +1577,10 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                     track_status_sim[data[1] - 1] = 1
                     await departure_to_data()
                     logging.info("Occupied track")
-                    await track_semaphore.acquire()
+                    # Just for the hmi. If all the tracks are occupied don't lock this function
+                    if not track_semaphore.locked() and len(data) == 4:
+                        await track_semaphore.acquire()
+
                     modbus_data_queue.put(["T", data[1], "O"])
                 else:
                     track_status_sim[data[1] - 1] = 0
@@ -1914,7 +1924,7 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
 
                     recv_signature = await reader.read(1024)
 
-                    if not expected_signature == recv_signature:
+                    if not expected_signature.hexdigest() == recv_signature.hex():
                         logging.critical("MITM detected")
                         raise RuntimeError
 
