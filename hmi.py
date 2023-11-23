@@ -75,7 +75,8 @@ give_up_switch = asyncio.Event()
 track_semaphore = asyncio.Semaphore(value=6)
 track_status_sim = [0] * 6  # this is the track_status that the trains use when deciding on a track.
 
-lst = [asyncio.Event(), asyncio.Event(), asyncio.Event(), asyncio.Event(), asyncio.Event(), asyncio.Event()]
+lst_of_ids = []
+new_train = asyncio.Event()
 
 switch_lock = asyncio.Lock()
 switch_status = 1  # 1 - 6
@@ -839,11 +840,12 @@ async def departure() -> None:
     """Simulates control for departing trains from the train station.
     Tries to acquire the switch so it is at the correct track and then remove the train from the list."""
     while True:
+        idx = 0
         logging.info("Started departure")
         json_data = await read_from_file(1)
 
         if json_data:
-            first_entry = json_data[0]
+            first_entry = json_data[idx]
 
             estimated_time = datetime.strptime(first_entry['EstimatedTime'], "%Y-%m-%d %H:%M")
 
@@ -859,6 +861,28 @@ async def departure() -> None:
             except asyncio.TimeoutError:
                 logging.info("Timeout error")
                 pass
+
+            # time has arrived. Check if train has arrived.
+
+            new_train.clear()
+
+            if not first_entry['id'] in lst_of_ids and len(lst_of_ids) != 0:                
+                for i in range(1, 6):
+                    if json_data[i] in lst_of_ids:
+                        idx = i
+                        break
+                try:
+                    est_time = datetime.strptime(json_data[idx]['EstimatedTime'], "%Y-%m-%d %H:%M")
+                    diff = est_time - datetime.now()
+                    await asyncio.wait_for(new_train.wait(), diff.total_seconds() - 2 * 60)
+                    continue
+                except TimeoutError:
+                    first_entry = json_data[idx]
+                    pass
+            elif len(lst_of_ids) == 0:
+                await new_train.wait()
+                continue
+
 
             departure_switch_request.set()
 
@@ -880,7 +904,7 @@ async def departure() -> None:
 
             if json_data:
                 # Retrieve the updated first entry after waiting for the departure event
-                first_entry = json_data[0]
+                first_entry = json_data[idx]
 
                 updated_estimated_time = datetime.strptime(first_entry['EstimatedTime'], "%Y-%m-%d %H:%M")
 
@@ -1658,7 +1682,7 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                     # Check that the train has enough time to arrive before the next train
                     difference = merged_existing_times[0] - (estimated_time + timedelta(minutes=1))
                     # Ensure trains are not scheduled too close together
-                    if difference >= timedelta(minutes=3):
+                    if difference >= timedelta(minutes=2):
                         train_data = {'AdvertisedTime': advertised_arrival_time.strftime("%Y-%m-%d %H:%M"),
                                       'EstimatedTime': estimated_time.strftime("%Y-%m-%d %H:%M"),
                                       'TrackAtLocation': data[4],
@@ -1722,7 +1746,7 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                         try:
                             temp = switch_queue.get_nowait()
 
-                            if temp[0] == 1:
+                            if temp[0] != 0:
                                 await switch_queue.put(temp)
 
                             switch_queue.get_nowait()
