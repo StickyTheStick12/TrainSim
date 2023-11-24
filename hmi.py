@@ -41,6 +41,11 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import dh
 from cryptography.fernet import Fernet
 
+try:
+    os.remove("logfile.log")
+except FileNotFoundError:
+    pass
+
 # Configure the logger
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(funcName)s - %(message)s', level=logging.INFO)
 
