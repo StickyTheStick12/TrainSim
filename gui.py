@@ -1,10 +1,7 @@
 import customtkinter as ctk
-from pymodbus.client import AsyncModbusTlsClient
-from pymodbus.transaction import ModbusTlsFramer
-from pymodbus.exceptions import ModbusException
-
 from PIL import Image, ImageTk
 
+import struct
 import asyncio
 import logging
 import multiprocessing
@@ -12,8 +9,7 @@ import hmac
 import hashlib
 import base64
 import random
-import sys
-import time
+import os
 
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes
@@ -22,15 +18,18 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import dh
 from cryptography.fernet import Fernet
 
-logging.basicConfig(format='%(asctime)s - %(levelname)s - %(funcName)s - %(message)s', level=logging.INFO)
-_logger = logging.getLogger(__file__)
+try:
+    os.remove(os.path.join(os.getcwd(), "logs", "GUI.log"))
+except FileNotFoundError:
+    pass
 
-# Modbus variables
-datastore_size = 124  # needs to be the same size as the server, max 125 though
-path_to_cert = "/home/vboxuser/tls/cert.pem"
-path_to_key = "/home/vboxuser/tls/key.pem"
-host = "localhost"
-port = 12345
+# Configure the logger
+logging.basicConfig(format='%(asctime)s - %(levelname)s - %(funcName)s - %(message)s', level=logging.INFO)
+
+# Create a FileHandler to write log messages to a file
+file_handler = logging.FileHandler(os.path.join(os.getcwd(), "logs", 'GUI.log'))
+file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(funcName)s - %(message)s'))
+logging.getLogger().addHandler(file_handler)
 
 exit_event = asyncio.Event()
 
@@ -79,7 +78,7 @@ class TrainStation(ctk.CTk):
         for c in range(6):
             self.tracks_frame.grid_columnconfigure(c, weight=1)
 
-        self.image = Image.open("/home/vboxuser/Downloads/TrainSim-Version-2/train.png")
+        self.image = Image.open("/home/kevin/Downloads/TrainSim-master/train.png")
         self.image = self.image.resize((50, 140))
         self.image = ImageTk.PhotoImage(self.image)
 
@@ -286,23 +285,16 @@ class TrainStation(ctk.CTk):
             track_status.config(bg="green")  # Set the indicator to green(available)
 
     def crash(self, track):
-        """Crash animation"""
+        """Crash simulation"""
         track_index = track - 1
         train_canvas = self.track_canvases[track_index]
         train_canvas.create_oval(0, 100, 100, 200,
                                  fill="orange")  # Create the explosion between the train in the station and the train moving towards the station
-        crash_label = ctk.CTkLabel(self.tracks_frame, text="Crash occurred", font=ctk.CTkFont(size=48), corner_radius=6)
-        crash_label.grid(row=2, column=0, columnspan=6)
-        exit_event.set()
-        time.sleep(15)
-        modbus_process.join()
-        sys.exit()
 
     def process_modbus_data(self) -> None:
         if not modbus_data_queue.empty():
             # Don't block this thread if no data is available
             data = modbus_data_queue.get_nowait()
-            _logger.info(data)
             match data[0]:
                 case "A":
                     # Packet: ["A", "index", "EstimatedTime", "ToLocation", "Track"]
@@ -335,118 +327,27 @@ class TrainStation(ctk.CTk):
 
 def modbus_client_thread() -> None:
     """This thread will start the modbus client and connect to the server"""
-    client = None
     loop = asyncio.new_event_loop()
-    a_queue = asyncio.Queue()
     secret_key = b""
     highest_data_id = 0
     global modbus_data_queue
+    MESSAGE_TYPE_PACKED = 1
 
-    async def run_client() -> None:
-        """Run client"""
-        nonlocal client
+    async def choose_characters(secret: bytes) -> str:
+        hash_object = hashlib.sha256(secret)
+        hash_hex = hash_object.hexdigest()
 
-        client = AsyncModbusTlsClient(
-            host,
-            port=port,
-            framer=ModbusTlsFramer,
-            certfile=path_to_cert,
-            keyfile=path_to_key,
-            server_hostname="host",
-        )
+        indexes = list(range(len(hash_hex) // 2))
 
-        _logger.info("Started client")
+        random.seed(int(hash_hex[:16], 16))  # Use the first 16 characters of the hash as the seed
+        selected_indexes = random.choices(indexes, k=32)
+        result = [hash_hex[i * 2: (i + 1) * 2] for i in selected_indexes]
 
-        await client.connect()
-        # if we can't connect try again after 5 seconds, if the server hasn't been started yet
-        while not client.connected:
-            _logger.info("Couldn't connect to server, trying again in 5 seconds")
-            await asyncio.sleep(5)
-            await client.connect()
-        _logger.info("Connected to server")
-
-        # Write confirmation to server that we are active
-        await client.write_register(datastore_size - 2, 1, slave=1)
-        _logger.debug("Wrote confirmation to server")
-
-    async def read_holding_register() -> None:
-        """Reads data from holding register"""
-        nonlocal client
-        nonlocal secret_key
-        nonlocal highest_data_id
-
-        try:
-            while True:
-                # poll the flag bit to see if new information has been written
-                hold_register = await client.read_holding_registers(datastore_size - 2, 1, slave=1)
-
-                if hold_register.registers == [0]:
-                    hold_register = await client.read_holding_registers(0x00, datastore_size - 3, slave=1)
-
-                    if not hold_register.isError():
-                        data_id = hold_register.registers[0]
-                        amount_to_read = hold_register.registers[1]
-
-                        received_data = "".join(chr(char) for char in hold_register.registers[2:2 + amount_to_read + 1
-                                                                                                + 2 + 1 + 64])
-
-                        nonce = received_data[1 + amount_to_read:1 + amount_to_read + 2]
-                        signature = received_data[1 + amount_to_read + 3:]
-                        data = received_data[:amount_to_read].split(" ")
-
-                        if not data_id > highest_data_id:
-                            continue
-
-                        highest_data_id = data_id
-
-                        # verify signature
-                        calc_signature = " ".join(str(value) for value in data) + str(data_id)
-                        _logger.info(f"calculating signature for this {calc_signature}")
-                        calc_signature = hmac.new(secret_key, calc_signature.encode(), hashlib.sha256).hexdigest()
-
-                        if signature == calc_signature:
-                            # calculate new signature for nonce
-                            nonce = [ord(char) for char in nonce]
-                            calc_signature = hmac.new(secret_key, str(nonce).encode(), hashlib.sha256).hexdigest()
-
-                            calc_signature = [ord(char) for char in calc_signature]
-                            _logger.info(calc_signature)
-                            for i in range(len(calc_signature)):
-                                await client.write_register(i, calc_signature[i], slave=1)
-
-                            _logger.info("Resetting flag")
-                            await client.write_register(datastore_size - 2, 1, slave=1)
-
-                            _logger.info(f"received {data}")
-
-                            _logger.info("Verified signature on data, notified gui.")
-
-                            # This is only for attack scenario
-                            if data[0] == "Q":
-                                await a_queue.put(data[1])
-                                data[0] = "S"
-
-                            # put data in queue for the GUI thread
-                            modbus_data_queue.put(data)
-                    else:
-                        _logger.error("Error reading holding register")
-
-                _logger.debug("sleeping for 0.5 seconds")
-                await asyncio.sleep(0.5)
-        except ModbusException as exc:
-            _logger.error(f"Received ModbusException({exc}) from library")
-            client.close()
-
-    async def send_data(writer: asyncio.StreamWriter) -> None:
-        data = await a_queue.get()
-        writer.write(data)
-        await writer.drain()
+        return "".join(result)
 
     async def handle_server() -> None:
-        async def receive_key(reader: asyncio.StreamReader,
-                              writer: asyncio.StreamWriter) -> None:
-            loop.create_task(send_data(writer))
-
+        async def receive_data(reader: asyncio.StreamReader,
+                               writer: asyncio.StreamWriter) -> None:
             nonlocal secret_key
             nonlocal highest_data_id
 
@@ -482,76 +383,132 @@ def modbus_client_thread() -> None:
             secret_key = base64.urlsafe_b64encode(derived_key)
 
             while True:
+                logging.info("Received data")
                 data = await reader.read(1024)
 
-                if data.decode() == "D":
-                    logging.info("Down here")
-                    p = 0xFFFFFFFFFFFFFFFFC90FDAA22168C234C4C6628B80DC1CD129024E088A67CC74020BBEA63B139B22514A08798E3404DDEF9519B3CD3A431B302B0A6DF25F14374FE1356D6D51C245E485B576625E7EC6F44C42E9A637ED6B0BFF5CB6F406B7EDEE386BFB5A899FA5AE9F24117C4B1FE649286651ECE45B3DC2007CB8A163BF0598DA48361C55D39A69163FA8FD24CF5F83655D23DCA3AD961C62F356208552BB9ED529077096966D670C354E4ABC9804F1746C08CA18217C32905E462E36CE3BE39E772C180E86039B2783A2EC07A28FB5C55DF06F4C52C9DE2BCBF6955817183995497CEA956AE515D2261898FA051015728E5A8AACAA68FFFFFFFFFFFFFFFF
-                    g = 2
+                received_header = data[:8]
+                message_type, data_length = struct.unpack('!II', received_header)
 
-                    params_numbers = dh.DHParameterNumbers(p, g)
-                    parameters = params_numbers.parameters(default_backend())
+                if message_type == MESSAGE_TYPE_PACKED:
+                    logging.info("Received data to GUI")
+                    unpacked_length = struct.unpack('!I', data[:4])[0]
+                    data = list(struct.unpack('!{}I'.format(unpacked_length), data[4:]))
 
-                    private_key = parameters.generate_private_key()
-                    public_key = private_key.public_key()
+                    data_id = data[0]
+                    amount_to_read = data[1]
 
-                    public_key_bytes = public_key.public_bytes(
-                        encoding=serialization.Encoding.PEM,
-                        format=serialization.PublicFormat.SubjectPublicKeyInfo
-                    )
+                    received_data = "".join(
+                        chr(char) for char in data[2:2 + amount_to_read + 1
+                                                     + 2 + 1 + 64])
 
-                    server_public_key = await reader.read(2048)
-                    writer.write(public_key_bytes)
-                    await writer.drain()
+                    nonce = received_data[1 + amount_to_read:1 + amount_to_read + 2]
+                    signature = received_data[1 + amount_to_read + 3:]
+                    data = received_data[:amount_to_read].split(" ")
 
-                    test = await reader.read(1024)
+                    if not data_id > highest_data_id:
+                        continue
 
-                    secret = await choose_characters(test)
+                    highest_data_id = data_id
 
-                    server_public_key = serialization.load_pem_public_key(server_public_key, backend=default_backend())
+                    # verify signature
+                    calc_signature = " ".join(str(value) for value in data) + str(data_id)
+                    logging.info(f"calculating signature for this {calc_signature}")
+                    calc_signature = hmac.new(secret_key, calc_signature.encode(), hashlib.sha256).hexdigest()
 
-                    shared_secret = private_key.exchange(server_public_key)
+                    if signature == calc_signature:
+                        # calculate new signature for nonce
+                        nonce = [ord(char) for char in nonce]
+                        calc_signature = hmac.new(secret_key, str(nonce).encode(), hashlib.sha256).hexdigest()
 
-                    shared_secret += secret.encode()
+                        calc_signature = [ord(char) for char in calc_signature]
+                        logging.info(calc_signature)
 
-                    derived_key = HKDF(
-                        algorithm=hashes.SHA256(),
-                        length=32,
-                        salt=None,
-                        info=b'handshake data',
-                    ).derive(shared_secret)
+                        packed_data = struct.pack('!64s', calc_signature)
 
-                    secret_key = base64.urlsafe_b64encode(derived_key)
+                        writer.write(packed_data)
+                        await writer.drain()
 
-                    signature = hmac.new(secret_key, test, hashlib.sha256).hexdigest()
+                        logging.info("Verified signature on data, notified gui.")
 
-                    await writer.drain()
+                        # put data in queue for the GUI thread
+                        modbus_data_queue.put(data)
+                    else:
+                        logging.critical("Found wrong signature in data")
                 else:
-                    cipher = Fernet(secret_key)
-                    secret_key = cipher.decrypt(data)
+                    received_single_char = data[8:8 + data_length]
 
-                _logger.info("Updated secret key")
-                highest_data_id = 0
+                    if received_single_char.decode() == "D":
+                        logging.info("Received diffie hellman update wish")
+                        p = 0xFFFFFFFFFFFFFFFFC90FDAA22168C234C4C6628B80DC1CD129024E088A67CC74020BBEA63B139B22514A08798E3404DDEF9519B3CD3A431B302B0A6DF25F14374FE1356D6D51C245E485B576625E7EC6F44C42E9A637ED6B0BFF5CB6F406B7EDEE386BFB5A899FA5AE9F24117C4B1FE649286651ECE45B3DC2007CB8A163BF0598DA48361C55D39A69163FA8FD24CF5F83655D23DCA3AD961C62F356208552BB9ED529077096966D670C354E4ABC9804F1746C08CA18217C32905E462E36CE3BE39E772C180E86039B2783A2EC07A28FB5C55DF06F4C52C9DE2BCBF6955817183995497CEA956AE515D2261898FA051015728E5A8AACAA68FFFFFFFFFFFFFFFF
+                        g = 2
 
-        server = await asyncio.start_server(receive_key, "localhost", 12346)
+                        params_numbers = dh.DHParameterNumbers(p, g)
+                        parameters = params_numbers.parameters(default_backend())
+
+                        private_key = parameters.generate_private_key()
+                        public_key = private_key.public_key()
+
+                        public_key_bytes = public_key.public_bytes(
+                            encoding=serialization.Encoding.PEM,
+                            format=serialization.PublicFormat.SubjectPublicKeyInfo
+                        )
+
+                        server_public_key = await reader.read(2048)
+                        writer.write(public_key_bytes)
+                        await writer.drain()
+
+                        test = await reader.read(1024)
+
+                        secret = await choose_characters(test)
+
+                        server_public_key = serialization.load_pem_public_key(server_public_key,
+                                                                              backend=default_backend())
+
+                        shared_secret = private_key.exchange(server_public_key)
+
+                        shared_secret += secret.encode()
+
+                        derived_key = HKDF(
+                            algorithm=hashes.SHA256(),
+                            length=32,
+                            salt=None,
+                            info=b'handshake data',
+                        ).derive(shared_secret)
+
+                        secret_key = base64.urlsafe_b64encode(derived_key)
+
+                        signature = hmac.new(secret_key, test, hashlib.sha256).hexdigest()
+
+                        writer.write(signature.encode())
+                        await writer.drain()
+                    else:
+                        logging.info("Received wish for ordinary key rotation")
+                        data = await reader.read(1024)
+                        cipher = Fernet(secret_key)
+                        secret_key = cipher.decrypt(data)
+
+                    logging.info("Updated secret key")
+                    highest_data_id = 0
+
+        server = await asyncio.start_server(receive_data, "localhost", 12346)
         async with server:
             await server.serve_forever()
 
+    async def shutdown():
+        await exit_event.wait()
+        logging.info("Received wish to exit from gui")
+        tasks = [task for task in asyncio.all_tasks() if task is not asyncio.current_task()]
+        for task in tasks:
+            task.cancel()
 
-    async def choose_characters(secret: bytes) -> str:
-        hash_object = hashlib.sha256(secret)
-        hash_hex = hash_object.hexdigest()
-        indexes = list(range(len(hash_hex) // 2))
+        await asyncio.gather(*tasks, return_exceptions=True)
+        loop.stop()
 
-        random.seed(int(hash_hex[:16], 16))  # Use the first 16 characters of the hash as the seed
-        selected_indexes = random.choices(indexes, k=32)
-        result = [hash_hex[i * 2: (i + 1) * 2] for i in selected_indexes]
-
-        return "".join(result)
-
-    loop.run_until_complete(run_client())
-    loop.create_task(handle_server())
-    loop.run_until_complete(read_holding_register())
+    try:
+        loop.create_task(shutdown())
+        loop.create_task(handle_server())
+    finally:
+        loop.close()
 
 
 if __name__ == "__main__":
