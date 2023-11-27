@@ -2095,9 +2095,8 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                         logging.debug("Waiting for client to copy datastore; sleeping 0.5 seconds")
                         await asyncio.sleep(0.5)  # give the server control so it can answer the client
 
-                    if context[slave_id].getValues(func_code, 1, 64) == expected_signature:
+                    if context[slave_id].getValues(func_code, 0, 64) == expected_signature:
                         logging.debug("Client is verified")
-                        switch_status = context[slave_id].getValues(func_code, 0, 1)
                         client_verified = True
                     else:
                         logging.critical("Found wrong signature in holding register")
@@ -2115,10 +2114,12 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
 
                     if sequence_number_gui == 100:
                         logging.info("Updating secret key")
-                        await update_keys(gui_key)
+                        await update_keys(gui_key, 1)
 
                     data_to_send = ([sequence_number_gui] + [len(data)] + [ord(char) for char in data] + [32] + nonce +
                                     [32] + [ord(char) for char in temp_signature])
+
+                    logging.info(data_to_send)
 
                     logging.debug("Sending data")
                     packed_data = struct.pack('!I{}I'.format(len(data_to_send)), len(data_to_send), *data_to_send)
@@ -2127,15 +2128,16 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                     writer_gui.write(combined_data_packed_data)
                     await writer_gui.drain()
 
-                    expected_signature = hmac.new(gui_key, str(nonce).encode(), hashlib.sha256).hexdigest()
+                    expected_signature = [ord(char) for char in hmac.new(gui_key, str(nonce).encode(), hashlib.sha256).hexdigest()]
 
                     logging.debug(f"nonce {str(nonce)}")
-                    expected_signature = [ord(char) for char in expected_signature]
                     logging.debug(f"Expecting: {expected_signature}")
 
                     packed_data = await reader_gui.read(1024)
 
-                    received_signature = struct.unpack('!64s', packed_data)[0]
+                    received_signature = list(struct.unpack('!64I', packed_data))
+
+                    logging.info(received_signature)
 
                     if received_signature == expected_signature:
                         logging.debug("Client is verified")
