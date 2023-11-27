@@ -59,8 +59,8 @@ logging.getLogger().addHandler(file_handler)
 datastore_size = 95  # cant be bigger than 125
 modbus_port = 12345
 
-cert = os.path.join(os.getcwd(), "TLS", "TLS/cert.pem")
-key = os.path.join(os.getcwd(), "TLS", "TLS/key.pem")
+cert = os.path.join(os.getcwd(), "TLS", "cert.pem")
+key = os.path.join(os.getcwd(), "TLS", "key.pem")
 
 arrival_file_mutex = asyncio.Lock()
 departure_file_mutex = asyncio.Lock()
