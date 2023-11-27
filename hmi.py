@@ -1350,19 +1350,21 @@ async def get_switch_status(context: ModbusServerContext, switch_key: bytes, seq
         logging.debug("Resetting flag")
         context[slave_id].setValues(func_code, datastore_size - 2, [0])
 
-        expected_signature = hmac.new(switch_key, str(nonce).encode(), hashlib.sha256).hexdigest()
-
         logging.debug(f"nonce {str(nonce)}")
-        expected_signature = [ord(char) for char in expected_signature]
-        logging.debug(f"Expecting: {expected_signature}")
 
         while context[slave_id].getValues(func_code, datastore_size - 2, 1) == [0]:
             logging.debug("Waiting for client to copy datastore; sleeping 0.5 seconds")
             await asyncio.sleep(0.5)  # give the server control so it can answer the client
 
-        if context[slave_id].getValues(func_code, 1, 64) == expected_signature:
-            logging.debug("Client is verified")
-            switch_status = context[slave_id].getValues(func_code, 0, 1)
+        recv_data = context[slave_id].getValues(func_code, 0, 65)
+
+        temp_sig = [recv_data[0]] + nonce
+
+        calc_signature = [ord(char) for char in hmac.new(switch_key, str(temp_sig).encode(), hashlib.sha256).hexdigest()]
+
+        if calc_signature == recv_data[1:]:
+            logging.info("Client is verified")
+            switch_status = recv_data[0]
             client_verified = True
         else:
             logging.critical("Found wrong signature in holding register")
