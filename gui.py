@@ -391,8 +391,10 @@ def modbus_client_thread() -> None:
 
                 if message_type == MESSAGE_TYPE_PACKED:
                     logging.info("Received data to GUI")
-                    unpacked_length = struct.unpack('!I', data[:4])[0]
-                    data = list(struct.unpack('!{}I'.format(unpacked_length), data[4:]))
+                    # unpacked_length = struct.unpack('!I', data[4:8])[0]
+                    data = list(struct.unpack('!{}I'.format(data_length // 4), data[8:]))
+                    data = data[1:]
+                    logging.info(data)
 
                     data_id = data[0]
                     amount_to_read = data[1]
@@ -401,8 +403,10 @@ def modbus_client_thread() -> None:
                         chr(char) for char in data[2:2 + amount_to_read + 1
                                                      + 2 + 1 + 64])
 
+                    logging.info(received_data)
                     nonce = received_data[1 + amount_to_read:1 + amount_to_read + 2]
                     signature = received_data[1 + amount_to_read + 3:]
+
                     data = received_data[:amount_to_read].split(" ")
 
                     if not data_id > highest_data_id:
@@ -418,12 +422,15 @@ def modbus_client_thread() -> None:
                     if signature == calc_signature:
                         # calculate new signature for nonce
                         nonce = [ord(char) for char in nonce]
+
+                        logging.info(nonce)
+
                         calc_signature = hmac.new(secret_key, str(nonce).encode(), hashlib.sha256).hexdigest()
 
                         calc_signature = [ord(char) for char in calc_signature]
                         logging.info(calc_signature)
 
-                        packed_data = struct.pack('!64s', calc_signature)
+                        packed_data = struct.pack('!64I', *calc_signature)
 
                         writer.write(packed_data)
                         await writer.drain()
@@ -505,8 +512,8 @@ def modbus_client_thread() -> None:
         loop.stop()
 
     try:
-        loop.create_task(shutdown())
         loop.create_task(handle_server())
+        loop.run_until_complete(shutdown())
     finally:
         loop.close()
 
