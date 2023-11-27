@@ -394,7 +394,6 @@ def modbus_client_thread() -> None:
                     # unpacked_length = struct.unpack('!I', data[4:8])[0]
                     data = list(struct.unpack('!{}I'.format(data_length // 4), data[8:]))
                     data = data[1:]
-                    logging.info(data)
 
                     data_id = data[0]
                     amount_to_read = data[1]
@@ -416,14 +415,12 @@ def modbus_client_thread() -> None:
 
                     # verify signature
                     calc_signature = " ".join(str(value) for value in data) + str(data_id)
-                    logging.info(f"calculating signature for this {calc_signature}")
+                    logging.debug(f"calculating signature for this {calc_signature}")
                     calc_signature = hmac.new(secret_key, calc_signature.encode(), hashlib.sha256).hexdigest()
 
                     if signature == calc_signature:
                         # calculate new signature for nonce
                         nonce = [ord(char) for char in nonce]
-
-                        logging.info(nonce)
 
                         calc_signature = hmac.new(secret_key, str(nonce).encode(), hashlib.sha256).hexdigest()
 
