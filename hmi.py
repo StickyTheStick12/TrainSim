@@ -105,7 +105,7 @@ login_manager.init_app(app)
 departure_file_version = 0
 arrival_file_version = 0
 file_secret_key = Fernet.generate_key()
-switch_status = 0
+switch_status = 1
 
 
 class Users(UserMixin):
@@ -1249,6 +1249,7 @@ async def acquire_switch(switch_queue: asyncio.Queue) -> None:
         modbus_data_queue.put(["Z", data[1]])
 
         func_codes[int(data[0])].set()
+        switch_status = data[1]
         modbus_data_queue.put(["S", str(switch_status)])
         await departure_to_data()
 
@@ -1543,7 +1544,7 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
             case "a":
                 logging.info("Received arrival update from a train")
 
-                switch_status, sequence_number_switch = get_switch_status(context, switch_key, sequence_number_switch)
+                switch_status, sequence_number_switch = await get_switch_status(context, switch_key, sequence_number_switch)
 
                 if switch_status != int(data[2]):
                     logging.info("Updating track in json, due to switch status being different to expected track")
