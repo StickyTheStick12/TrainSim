@@ -78,7 +78,7 @@ class TrainStation(ctk.CTk):
         for c in range(6):
             self.tracks_frame.grid_columnconfigure(c, weight=1)
 
-        self.image = Image.open("/home/kevin/Downloads/TrainSim-master/train.png")
+        self.image = Image.open(os.path.join(os.getcwd(), "train.png"))
         self.image = self.image.resize((50, 140))
         self.image = ImageTk.PhotoImage(self.image)
 
