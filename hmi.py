@@ -2,10 +2,12 @@ from flask import Flask, render_template, request, redirect, url_for, session, f
 from flask_login import login_user, logout_user, login_required, current_user, LoginManager, UserMixin
 import bcrypt
 
-# TODO: cant wait for swithc update at the same time we update diffie hellman key.
+# TODO: Remove switch from simulation
 
-# for the first problem we can solve it by destroying the task. Send the diffie hellman because the client has functionality for that
-# and then create the task again. If the client sends anything and doesn't get a response it will resend it again.
+# sim -> gui 123456 tcp
+# flask 5001
+# sim -> switch 12345 modbus
+# sim -> switch 12344 tcp
 
 import modules as SQL
 import bisect
@@ -23,6 +25,7 @@ import base64
 import aiohttp
 from heapq import merge
 import random
+import struct
 
 from pymodbus import __version__ as pymodbus_version
 from pymodbus.datastore import (
@@ -42,7 +45,7 @@ from cryptography.hazmat.primitives.asymmetric import dh
 from cryptography.fernet import Fernet
 
 try:
-    os.remove("logfile.log")
+    os.remove(os.path.join(os.getcwd(), "logs", "HMI.log"))
 except FileNotFoundError:
     pass
 
@@ -50,16 +53,16 @@ except FileNotFoundError:
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(funcName)s - %(message)s', level=logging.INFO)
 
 # Create a FileHandler to write log messages to a file
-file_handler = logging.FileHandler('logfile.log')
+file_handler = logging.FileHandler(os.path.join(os.getcwd(), "logs", 'HMI.log'))
 file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(funcName)s - %(message)s'))
 logging.getLogger().addHandler(file_handler)
 
 # Modbus variables
-datastore_size = 124  # cant be bigger than 125
+datastore_size = 95  # cant be bigger than 125
 modbus_port = 12345
 
-cert = r"cert.pem"
-key = r"key.pem"
+cert = os.path.join(os.getcwd(), "TLS", "cert.pem")
+key = os.path.join(os.getcwd(), "TLS", "key.pem")
 
 arrival_file_mutex = asyncio.Lock()
 departure_file_mutex = asyncio.Lock()
@@ -871,7 +874,7 @@ async def departure() -> None:
 
             new_train.clear()
 
-            if not first_entry['id'] in lst_of_ids and len(lst_of_ids) != 0:                
+            if not first_entry['id'] in lst_of_ids and len(lst_of_ids) != 0:
                 for i in range(1, 6):
                     if json_data[i] in lst_of_ids:
                         idx = i
@@ -1036,14 +1039,14 @@ async def update_departure_time(id: str, est_time: datetime, has_changed: bool) 
             send_data.set()
 
 
-async def update_keys(secret_key: bytes) -> None:
-    """updates the modbus keys and sends it to the gui"""
-    new_modbus_key = Fernet.generate_key()
+async def update_keys(secret_key: bytes, requestor: int) -> None:
+    """updates the modbus keys and sends it to correct entity. requestor 0 for switch and 1 for gui"""
+    new_key = Fernet.generate_key()
     new_file_key = Fernet.generate_key()
     cipher = Fernet(secret_key)
-    encrypted_message = cipher.encrypt(new_modbus_key)
+    encrypted_message = cipher.encrypt(new_key)
 
-    modbus_data_queue.put(["K", new_modbus_key, new_file_key, encrypted_message])
+    modbus_data_queue.put(["K", requestor, new_key, new_file_key, encrypted_message])
 
 
 async def train_match() -> None:
@@ -1264,17 +1267,6 @@ async def acquire_switch(switch_queue: asyncio.Queue) -> None:
         serving[int(data[0])].clear()
 
 
-async def update_switch_from_gui(reader: asyncio.StreamReader) -> None:
-    """If the switch status get attacked on the way to the gui, the gui will respond with the new status to this
-    function"""
-    global switch_status
-    while True:
-        data = await reader.read(1024)
-
-        async with switch_lock:
-            switch_status = int(data.decode())
-
-
 async def send_new_entry() -> None:
     """Sends a new entry to the gui when there is a free place"""
     global entries_in_gui
@@ -1295,6 +1287,42 @@ async def send_new_entry() -> None:
             send_data.clear()
 
 
+async def dh_exchange(reader: asyncio.StreamReader,
+                               writer: asyncio.StreamWriter) -> bytes:
+    p = 0xFFFFFFFFFFFFFFFFC90FDAA22168C234C4C6628B80DC1CD129024E088A67CC74020BBEA63B139B22514A08798E3404DDEF9519B3CD3A431B302B0A6DF25F14374FE1356D6D51C245E485B576625E7EC6F44C42E9A637ED6B0BFF5CB6F406B7EDEE386BFB5A899FA5AE9F24117C4B1FE649286651ECE45B3DC2007CB8A163BF0598DA48361C55D39A69163FA8FD24CF5F83655D23DCA3AD961C62F356208552BB9ED529077096966D670C354E4ABC9804F1746C08CA18217C32905E462E36CE3BE39E772C180E86039B2783A2EC07A28FB5C55DF06F4C52C9DE2BCBF6955817183995497CEA956AE515D2261898FA051015728E5A8AACAA68FFFFFFFFFFFFFFFF
+    g = 2
+
+    params_numbers = dh.DHParameterNumbers(p, g)
+    parameters = params_numbers.parameters(default_backend())
+
+    private_key = parameters.generate_private_key()
+    public_key = private_key.public_key()
+
+    public_key_bytes = public_key.public_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo
+    )
+
+    writer.write(public_key_bytes)
+    await writer.drain()
+
+    public_key_bytes = await reader.read(2048)
+
+    received_public_key = serialization.load_pem_public_key(public_key_bytes, backend=default_backend())
+
+    shared_secret = private_key.exchange(received_public_key)
+
+    # Derive a key from the shared secret using a key derivation function (KDF)
+    derived_key = HKDF(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=None,
+        info=b'handshake data',
+    ).derive(shared_secret)
+
+    return derived_key
+
+
 async def handle_simulation_communication(context: ModbusServerContext) -> None:
     """Takes data from queue and sends to client"""
     global last_acquired_switch
@@ -1305,15 +1333,19 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
     global file_secret_key
     global entries_in_gui
 
+    MESSAGE_TYPE_PACKED = 1
+    MESSAGE_TYPE_SINGLE_CHAR = 2
+
     loop = asyncio.get_event_loop()
     switch_queue = asyncio.Queue()
 
     func_code = 3  # function code for modbus that we want to read and write data from holding register
     slave_id = 0x00  # we broadcast the data to all the connected slaves
-    address = 0x00
 
-    sequence_number = 0
-    rotation = 0
+    sequence_number_switch = 0
+    sequence_number_gui = 0
+    rotation_switch = 0
+    rotation_gui = 0
 
     # remove old json files
     try:
@@ -1370,55 +1402,33 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
         logging.info("Waiting for client to connect; sleeping 2 second")
         await asyncio.sleep(2)  # give the server control so it can answer the client
 
-    logging.info("Client has connected to modbus")
+    logging.info("Switch has connected to modbus")
 
     while True:
         try:
-            reader, writer = await asyncio.open_connection('localhost', 12346)
+            reader_switch, writer_switch = await asyncio.open_connection('localhost', 12344)
             break  # Break out of the loop if connection is successful
         except ConnectionRefusedError:
             logging.info("Connection to asyncio server failed. Retrying...")
             await asyncio.sleep(1)  # Wait for a while before retrying
 
-    logging.info("Connected to asyncio server")
+    logging.info("Connected to asyncio switch server")
 
-    # -------------------------------------------------#
-    p = 0xFFFFFFFFFFFFFFFFC90FDAA22168C234C4C6628B80DC1CD129024E088A67CC74020BBEA63B139B22514A08798E3404DDEF9519B3CD3A431B302B0A6DF25F14374FE1356D6D51C245E485B576625E7EC6F44C42E9A637ED6B0BFF5CB6F406B7EDEE386BFB5A899FA5AE9F24117C4B1FE649286651ECE45B3DC2007CB8A163BF0598DA48361C55D39A69163FA8FD24CF5F83655D23DCA3AD961C62F356208552BB9ED529077096966D670C354E4ABC9804F1746C08CA18217C32905E462E36CE3BE39E772C180E86039B2783A2EC07A28FB5C55DF06F4C52C9DE2BCBF6955817183995497CEA956AE515D2261898FA051015728E5A8AACAA68FFFFFFFFFFFFFFFF
-    g = 2
+    derived_key = await dh_exchange(reader_switch, writer_switch)
+    switch_key = base64.urlsafe_b64encode(derived_key)
 
-    params_numbers = dh.DHParameterNumbers(p, g)
-    parameters = params_numbers.parameters(default_backend())
+    while True:
+        try:
+            reader_gui, writer_gui = await asyncio.open_connection('localhost', 12346)
+            break  # Break out of the loop if connection is successful
+        except ConnectionRefusedError:
+            logging.info("Connection to asyncio server failed. Retrying...")
+            await asyncio.sleep(1)  # Wait for a while before retrying
 
-    private_key = parameters.generate_private_key()
-    public_key = private_key.public_key()
+    logging.info("Connected to asyncio gui server")
 
-    public_key_bytes = public_key.public_bytes(
-        encoding=serialization.Encoding.PEM,
-        format=serialization.PublicFormat.SubjectPublicKeyInfo
-    )
-
-    writer.write(public_key_bytes)
-    await writer.drain()
-
-    public_key_bytes = await reader.read(2048)
-
-    received_public_key = serialization.load_pem_public_key(public_key_bytes, backend=default_backend())
-
-    shared_secret = private_key.exchange(received_public_key)
-
-    # Derive a key from the shared secret using a key derivation function (KDF)
-    derived_key = HKDF(
-        algorithm=hashes.SHA256(),
-        length=32,
-        salt=None,
-        info=b'handshake data',
-    ).derive(shared_secret)
-
-    # Use the key material to generate a Fernet key
-    modbus_secret_key = base64.urlsafe_b64encode(derived_key)
-
-    # -------------------------------------------------#
-    # loop.create_task(update_switch_from_gui(reader))
+    derived_key = await dh_exchange(reader_gui, writer_gui)
+    gui_key = base64.urlsafe_b64encode(derived_key)
 
     while True:
         # Run blocking call in executor so all the other tasks can run and the server
@@ -1471,7 +1481,7 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
         # Packet ["U", "id", EstimatedTime, "track"]
 
         # K: update the key for the gui
-        # Packet ["K", b"key", b"encrypted new key"]
+        # Packet ["K", requestor, b"key", b"encrypted new key"]
 
         # H: arrival package to the gui. Marks that a train has arrived and to which track it has arrived
         # Packet: ["H", "track"]
@@ -1485,6 +1495,48 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
         match data[0]:
             case "a":
                 logging.info("Received arrival update from a train")
+
+                data = "Y " + " ".join(str(value) for value in data[1:])
+
+                client_verified = False
+
+                while not client_verified:
+                    sequence_number_switch += 1
+                    temp_signature = data + str(sequence_number_switch)
+                    logging.info(temp_signature)
+                    temp_signature = hmac.new(switch_key, temp_signature.encode(), hashlib.sha256).hexdigest()
+                    nonce = [char for char in secrets.token_bytes(2)]
+
+                    if sequence_number_switch == 100:
+                        logging.info("Updating secret key")
+                        await update_keys(switch_key, 0)
+
+                    data_to_send = ([sequence_number_switch] + [len(data)] + [ord(char) for char in data] + [32] + nonce +
+                                    [32] + [ord(char) for char in temp_signature])
+
+                    logging.debug("Sending data")
+                    context[slave_id].setValues(func_code, 0x00, data_to_send)
+
+                    logging.debug("Resetting flag")
+                    context[slave_id].setValues(func_code, datastore_size - 2, [0])
+
+                    expected_signature = hmac.new(switch_key, str(nonce).encode(), hashlib.sha256).hexdigest()
+
+                    logging.debug(f"nonce {str(nonce)}")
+                    expected_signature = [ord(char) for char in expected_signature]
+                    logging.debug(f"Expecting: {expected_signature}")
+
+                    while context[slave_id].getValues(func_code, datastore_size - 2, 1) == [0]:
+                        logging.debug("Waiting for client to copy datastore; sleeping 0.5 seconds")
+                        await asyncio.sleep(0.5)  # give the server control so it can answer the client
+
+                    if context[slave_id].getValues(func_code, 1, 64) == expected_signature:
+                        logging.debug("Client is verified")
+                        switch_status = context[slave_id].getValues(func_code, 0, 1)
+                        client_verified = True
+                    else:
+                        logging.critical("Found wrong signature in holding register")
+
                 if switch_status != int(data[2]):
                     logging.info("Updating track in json, due to switch status being different to expected track")
 
@@ -1904,9 +1956,17 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                 departure_file_version = 0
                 arrival_file_version = 0
 
-                if rotation == 3:
-                    writer.write("D".encode())
-                    await writer.drain()
+                rotation = [rotation_switch, rotation_gui]
+                writer = [writer_switch, writer_gui]
+                reader = [reader_switch, reader_gui]
+                sequence_number = [sequence_number_switch, sequence_number_gui]
+
+                if rotation[data[1]] == 3:
+                    header_char = struct.pack('!II', MESSAGE_TYPE_SINGLE_CHAR, 1)
+                    combined_data_char = header_char + b'D'
+
+                    writer[data[1]].write(combined_data_char)
+                    await writer[data[1]].drain()
 
                     p = 0xFFFFFFFFFFFFFFFFC90FDAA22168C234C4C6628B80DC1CD129024E088A67CC74020BBEA63B139B22514A08798E3404DDEF9519B3CD3A431B302B0A6DF25F14374FE1356D6D51C245E485B576625E7EC6F44C42E9A637ED6B0BFF5CB6F406B7EDEE386BFB5A899FA5AE9F24117C4B1FE649286651ECE45B3DC2007CB8A163BF0598DA48361C55D39A69163FA8FD24CF5F83655D23DCA3AD961C62F356208552BB9ED529077096966D670C354E4ABC9804F1746C08CA18217C32905E462E36CE3BE39E772C180E86039B2783A2EC07A28FB5C55DF06F4C52C9DE2BCBF6955817183995497CEA956AE515D2261898FA051015728E5A8AACAA68FFFFFFFFFFFFFFFF
                     g = 2
@@ -1922,16 +1982,16 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                         format=serialization.PublicFormat.SubjectPublicKeyInfo
                     )
 
-                    writer.write(public_key_bytes)
-                    await writer.drain()
+                    writer[data[1]].write(public_key_bytes)
+                    await writer[data[1]].drain()
 
-                    public_key_bytes = await reader.read(2048)
+                    public_key_bytes = await reader[data[1]].read(2048)
 
                     # can just reuse the generated key as our challenge
-                    writer.write(data[1])
-                    await writer.drain()
+                    writer[data[1]].write(data[1])
+                    await writer[data[1]].drain()
 
-                    secret = choose_characters(data[1])
+                    secret = choose_characters(data[2])
                     received_public_key = serialization.load_pem_public_key(public_key_bytes, backend=default_backend())
 
                     shared_secret = private_key.exchange(received_public_key)
@@ -1947,26 +2007,39 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                     ).derive(shared_secret)
 
                     # Use the key material to generate a Fernet key
-                    modbus_secret_key = base64.urlsafe_b64encode(derived_key)
+                    if data[1] == 0:
+                        switch_key = base64.urlsafe_b64encode(derived_key)
+                        expected_signature = hmac.new(switch_key, data[2], hashlib.sha256)
+                    else:
+                        gui_key = base64.urlsafe_b64encode(derived_key)
+                        expected_signature = hmac.new(gui_key, data[2], hashlib.sha256)
 
-                    expected_signature = hmac.new(modbus_secret_key, data[1], hashlib.sha256)
-
-                    recv_signature = await reader.read(1024)
+                    recv_signature = await reader[data[1]].read(1024)
 
                     if not expected_signature.hexdigest() == recv_signature.hex():
                         logging.critical("MITM detected")
                         raise RuntimeError
 
-                    rotation = 0
+                    rotation[data[1]] = 0
                 else:
-                    modbus_secret_key = data[1]
-                    writer.write(data[3])
-                    await writer.drain()
-                    logging.info("sent new secret key")
-                    rotation += 1
+                    if data[1] == 0:
+                        switch_key = data[2]
+                    else:
+                        gui_key = data[2]
+                    
+                    header_char = struct.pack('!II', MESSAGE_TYPE_SINGLE_CHAR, 1)
+                    combined_data_char = header_char + b'K'
 
-                file_secret_key = data[2]
-                sequence_number = 0
+                    writer[data[1]].write(combined_data_char)
+                    await writer[data[1]].drain()
+
+                    writer[data[1]].write(data[3])
+                    await writer[data[1]].drain()
+                    logging.info("sent new secret key")
+                    rotation[data[1]] += 1
+
+                file_secret_key = data[3]
+                sequence_number[data[1]] = 0
 
                 await write_to_file(arrival_data, 0)
                 await write_to_file(departure_data, 1)
@@ -1974,32 +2047,32 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
             case "g":
                 json_data = await read_from_file(1)
                 modbus_data_queue.put(['r', int(json_data[data[1]]['TrackAtLocation']), json_data[data[1]]['id']])
-            case _:
-                data = " ".join(str(value) for value in data)
+            case "T":
+                data = "X " + " ".join(str(value) for value in data[1:])
 
                 client_verified = False
 
                 while not client_verified:
-                    sequence_number += 1
-                    temp_signature = data + str(sequence_number)
+                    sequence_number_switch += 1
+                    temp_signature = data + str(sequence_number_switch)
                     logging.info(temp_signature)
-                    temp_signature = hmac.new(modbus_secret_key, temp_signature.encode(), hashlib.sha256).hexdigest()
+                    temp_signature = hmac.new(switch_key, temp_signature.encode(), hashlib.sha256).hexdigest()
                     nonce = [char for char in secrets.token_bytes(2)]
 
-                    if sequence_number == 100:
+                    if sequence_number_switch == 100:
                         logging.info("Updating secret key")
-                        await update_keys(modbus_secret_key)
+                        await update_keys(switch_key, 0)
 
-                    data_to_send = ([sequence_number] + [len(data)] + [ord(char) for char in data] + [32] + nonce +
+                    data_to_send = ([sequence_number_switch] + [len(data)] + [ord(char) for char in data] + [32] + nonce +
                                     [32] + [ord(char) for char in temp_signature])
 
                     logging.debug("Sending data")
-                    context[slave_id].setValues(func_code, address, data_to_send)
+                    context[slave_id].setValues(func_code, 0x00, data_to_send)
 
                     logging.debug("Resetting flag")
                     context[slave_id].setValues(func_code, datastore_size - 2, [0])
 
-                    expected_signature = hmac.new(modbus_secret_key, str(nonce).encode(), hashlib.sha256).hexdigest()
+                    expected_signature = hmac.new(switch_key, str(nonce).encode(), hashlib.sha256).hexdigest()
 
                     logging.debug(f"nonce {str(nonce)}")
                     expected_signature = [ord(char) for char in expected_signature]
@@ -2009,7 +2082,49 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                         logging.debug("Waiting for client to copy datastore; sleeping 0.5 seconds")
                         await asyncio.sleep(0.5)  # give the server control so it can answer the client
 
-                    if context[slave_id].getValues(func_code, 0, 64) == expected_signature:
+                    if context[slave_id].getValues(func_code, 1, 64) == expected_signature:
+                        logging.debug("Client is verified")
+                        switch_status = context[slave_id].getValues(func_code, 0, 1)
+                        client_verified = True
+                    else:
+                        logging.critical("Found wrong signature in holding register")
+            case _:
+                data = " ".join(str(value) for value in data)
+
+                client_verified = False
+
+                while not client_verified:
+                    sequence_number_gui += 1
+                    temp_signature = data + str(sequence_number_gui)
+                    logging.info(temp_signature)
+                    temp_signature = hmac.new(gui_key, temp_signature.encode(), hashlib.sha256).hexdigest()
+                    nonce = [char for char in secrets.token_bytes(2)]
+
+                    if sequence_number_gui == 100:
+                        logging.info("Updating secret key")
+                        await update_keys(gui_key)
+
+                    data_to_send = ([sequence_number_gui] + [len(data)] + [ord(char) for char in data] + [32] + nonce +
+                                    [32] + [ord(char) for char in temp_signature])
+
+                    logging.debug("Sending data")
+                    packed_data = struct.pack('!I{}I'.format(len(data_to_send)), len(data_to_send), *data_to_send)
+                    header_packed_data = struct.pack('!II', MESSAGE_TYPE_PACKED, len(packed_data))
+                    combined_data_packed_data = header_packed_data + packed_data
+                    writer_gui.write(combined_data_packed_data)
+                    await writer_gui.drain()
+
+                    expected_signature = hmac.new(gui_key, str(nonce).encode(), hashlib.sha256).hexdigest()
+
+                    logging.debug(f"nonce {str(nonce)}")
+                    expected_signature = [ord(char) for char in expected_signature]
+                    logging.debug(f"Expecting: {expected_signature}")
+
+                    packed_data = await reader_gui.read(1024)
+
+                    received_signature = struct.unpack('!64s', packed_data)[0]
+
+                    if received_signature == expected_signature:
                         logging.debug("Client is verified")
                         client_verified = True
                     else:
