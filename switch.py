@@ -33,8 +33,8 @@ logging.getLogger().addHandler(file_handler)
 
 # Modbus variables
 datastore_size = 95  # needs to be the same size as the server, max 125 though
-cert = os.path.join(os.getcwd(), "TLS", "TLS/cert.pem")
-key = os.path.join(os.getcwd(), "TLS", "TLS/key.pem")
+cert = os.path.join(os.getcwd(), "TLS", "cert.pem")
+key = os.path.join(os.getcwd(), "TLS", "key.pem")
 host = "localhost"
 port = 12345
 
@@ -104,7 +104,7 @@ if __name__ == "__main__":
 
                         # verify signature
                         calc_signature = " ".join(str(value) for value in data) + str(data_id)
-                        logging.debug(f"calculating signature for this {calc_signature}")
+                        logging.info(f"calculating signature for this {calc_signature}")
                         calc_signature = hmac.new(secret_key, calc_signature.encode(), hashlib.sha256).hexdigest()
 
                         if signature == calc_signature:
@@ -128,7 +128,6 @@ if __name__ == "__main__":
                                 calc_signature = hmac.new(secret_key, str(data_to_send).encode(), hashlib.sha256).hexdigest()
 
                                 calc_signature = [switch_status] + [ord(char) for char in calc_signature]
-                                logging.info(calc_signature)
 
                                 await client.write_registers(0x00, calc_signature, slave=1)
 
@@ -237,6 +236,7 @@ if __name__ == "__main__":
         server = await asyncio.start_server(receive_key, "localhost", 12344)
         async with server:
             await server.serve_forever()
+
 
     async def choose_characters(secret: bytes) -> str:
         hash_object = hashlib.sha256(secret)
