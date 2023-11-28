@@ -24,17 +24,17 @@ from cryptography.hazmat.primitives.asymmetric import dh
 from cryptography.fernet import Fernet
 
 # Modbus variables
-datastore_size = 95  # cant be bigger than 125
+datastore_size = 95 # cant be bigger than 125
 modbus_port = 13000
 
 cert = os.path.join(os.getcwd(), "TLS", "cert.pem")
 key = os.path.join(os.getcwd(), "TLS", "key.pem")
 
-lst_of_statuses = ["A"*6]
+lst_of_statuses = ["A" * 6]
 
 sequence_number = 0
 
-secret_key = b"abc"
+secret_key = b""
 
 
 async def handle_server() -> None:
@@ -174,12 +174,12 @@ async def answer_client(idx: int, context: ModbusServerContext) -> None:
     global sequence_number
     global lst_of_statuses
 
-    hold_register = context.getValues(3, 0x00, datastore_size-3)
+    hold_register = context.getValues(3, 0x00, datastore_size - 3)
     data_id = hold_register[0]
     amount_to_read = hold_register[0]
 
     received_data = "".join(chr(char) for char in hold_register[2:2 + amount_to_read + 1
-                                                                            + 2 + 1 + 64])
+                                                                  + 2 + 1 + 64])
 
     nonce = received_data[1 + amount_to_read:1 + amount_to_read + 2]
     signature = received_data[1 + amount_to_read + 3:]
@@ -227,7 +227,7 @@ async def answer_client(idx: int, context: ModbusServerContext) -> None:
 async def run_modbus(lst_of_contexts: list) -> None:
     while True:
         for i in range(6):
-            if lst_of_contexts[i].getValues(3, datastore_size-2, 1) == [0]:
+            if lst_of_contexts[i].getValues(3, datastore_size - 2, 1) == [0]:
                 await answer_client(i, lst_of_contexts[i])
 
             await asyncio.sleep(0.3)
