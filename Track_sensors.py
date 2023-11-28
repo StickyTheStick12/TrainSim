@@ -30,7 +30,7 @@ modbus_port = 13000
 cert = os.path.join(os.getcwd(), "TLS", "cert.pem")
 key = os.path.join(os.getcwd(), "TLS", "key.pem")
 
-lst_of_statuses = ["A" * 6]
+lst_of_statuses = [0]*6
 
 sequence_number = 0
 
