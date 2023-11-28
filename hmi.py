@@ -2,12 +2,13 @@ from flask import Flask, render_template, request, redirect, url_for, session, f
 from flask_login import login_user, logout_user, login_required, current_user, LoginManager, UserMixin
 import bcrypt
 
-# sim -> gui 123456 tcp
-# flask 5001
-# sim -> switch 12345 modbus
-# sim -> switch 12344 tcp
-
-# maybe create a new train class that is an actual train. The train will communicate with this function and ask for a track etc. The train will then connect to the modbus server
+# flask listening on 5001
+# track_sensor modbus listening on 13000
+# track_sensor tcp listening on 13006
+# switch tcp listening on port 12344
+# hmi modbus listening on 12345
+# gui tcp listening on 12346
+# train tcp listening on port 15000
 
 import modules as SQL
 import bisect
@@ -36,6 +37,7 @@ from pymodbus.datastore import (
 from pymodbus.device import ModbusDeviceIdentification
 from pymodbus.transaction import ModbusTlsFramer
 from pymodbus.server import StartAsyncTlsServer
+from pymodbus.client import AsyncModbusTlsClient
 
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes
@@ -70,23 +72,20 @@ mutex = multiprocessing.Lock()
 
 last_acquired_switch = datetime.now() - timedelta(minutes=3)
 
+wake_arrival = asyncio.Event()
+wake_departure = asyncio.Event()
 departure_event = asyncio.Event()
 arrival_event = asyncio.Event()
 serving_departure = asyncio.Event()
 serving_arrival = asyncio.Event()
 arrival_switch_request = asyncio.Event()
 departure_switch_request = asyncio.Event()
-wake_arrival = asyncio.Event()
-wake_departure = asyncio.Event()
 give_up_switch = asyncio.Event()
 
 track_semaphore = asyncio.Semaphore(value=6)
 track_status_sim = [0] * 6  # this is the track_status that the trains use when deciding on a track.
 query_sensor = asyncio.Event()
-updated_sensor =  asyncio.Event()
-
-lst_of_ids = []
-new_train = asyncio.Event()
+updated_sensor = asyncio.Event()
 
 switch_lock = asyncio.Lock()
 entries_in_gui = 0
@@ -111,10 +110,9 @@ arrival_file_version = 0
 file_secret_key = Fernet.generate_key()
 switch_status = 1
 
-socket_com = []
-
+train_writer = None
+used_trains = [0]*7
 sensor_clients = []
-
 sensor_mutex = asyncio.Lock()
 
 
@@ -692,116 +690,270 @@ async def update_arrival() -> None:
         await asyncio.sleep(10 * 60)
 
 
-async def handle_train_one() -> None:
-    in_use = False
-
-    reader, writer = await asyncio.open_connection("localhost", 12345)
-
-    socket_com[0] = (writer, in_use)
-
+async def arrival() -> None:
+    """Simulates control for arriving trains to the train station.
+    Tries to acquire the switch, so it is at the correct track and then notifies gui when it has arrived"""
     while True:
-        data = await reader.read(1024)
+        logging.info("Starting arrival function")
+        json_data = await read_from_file(0)
 
-        if data.decode() != "Terminate":
-            modbus_data_queue.put(data)
-        else:
-            socket_com[0][1] = False
+        if json_data:
+            # Extract information from the first entry in the JSON data
+            first_entry = json_data[0]
+
+            estimated_time = datetime.strptime(first_entry['EstimatedTime'], "%Y-%m-%d %H:%M")
+
+            # Calculate the time difference between estimated time and current time
+            difference = estimated_time - datetime.now()
+
+            logging.info(f"{difference.total_seconds()} until train arrival")
+
+            try:
+                # Wait for the arrival event, with a timeout based on the estimated arrival time
+                await asyncio.wait_for(wake_arrival.wait(), timeout=max(0, difference.total_seconds() - 2 * 60))
+                wake_arrival.clear()
+                logging.info("Received a wakeup call")
+                continue
+            except asyncio.TimeoutError:
+                logging.info("TimeoutError on waiting for wakeup. Will ask for switch soon")
+                pass
+
+            # Retrieve the track number from the JSON data
+            track_number = int(first_entry['TrackAtLocation'])
+            has_changed_time = False
+
+            if track_semaphore.locked():
+                logging.info("Track semaphore was locked. Will do necessary work before waiting.")
+                departure_data = await read_from_file(1)
+                checked_trains = 0
+
+                # Find the first departing train that matches the arrival train
+                for train in departure_data:
+                    if not train['IsRemoved']:
+                        train_id = train['id']
+
+                        corresponding_arrival = next(
+                            (arrival_train for arrival_train in json_data if arrival_train['id'] == train_id),
+                            None
+                        )
+
+                        if not corresponding_arrival:
+                            first_entry['EstimatedTime'] = train['EstimatedTime']
+                            # Update the departure time for the arrival train
+                            await update_departure_time(first_entry['id'], datetime.strptime(
+                                first_entry['EstimatedTime'], "%Y-%m-%d %H:%M"), has_changed_time)
+
+                            has_changed_time = True
+                            break
+
+                        checked_trains += 1
+
+                        if checked_trains >= 6:
+                            break
+                    else:
+                        break
+
+            await track_semaphore.acquire()
+
+            if wake_arrival.is_set():
+                wake_arrival.clear()
+                logging.info("Wake arrival event has been set. Line 751")
+                continue
+
+            first_entry['EstimatedTime'] = datetime.now().strftime("%Y-%m-%d %H:%M")
+
+            # Update the departure time for the arrival train
+            await update_departure_time(first_entry['id'], datetime.now(), has_changed_time)
+
+            await write_to_file(json_data, 0)
+
+            if wake_arrival.is_set():
+                wake_arrival.clear()
+                logging.info("Wake arrival event has been set. Line 763")
+                continue
+
+            query_sensor.set()
+            await updated_sensor.wait()
+            updated_sensor.clear()
+
+            if track_status_sim[track_number - 1] == 0:
+                # If the track is available, occupy it and update track status
+                logging.info("Track was available for arrival")
+                arrival_switch_request.set()
+                modbus_data_queue.put(["s", 1, str(track_number)])
+                modbus_data_queue.put(["t", track_number, "O"])
+            else:
+                for i in range(6):
+                    if track_status_sim[i] == 0:
+                        # If the alternate track is available, occupy it and update track status
+                        logging.info("Original track wasn't available, chose another track instead")
+                        track_number = i + 1
+                        first_entry['TrackAtLocation'] = str(track_number)
+                        arrival_switch_request.set()
+                        modbus_data_queue.put(["s", 1, str(track_number)])
+                        modbus_data_queue.put(["t", track_number, "O"])
+
+                        await write_to_file(json_data, 0)
+
+                        # Update the track information in departure
+                        modbus_data_queue.put(["u", first_entry['id'], str(track_number)])
+                        break
+
+            await asyncio.sleep(0.5)
+
+            # Wait for the arrival event
+            await arrival_event.wait()
+            logging.info("Clear to arrive")
+            arrival_event.clear()
+
+            if wake_arrival.is_set():
+                wake_arrival.clear()
+                logging.info("Wake arrival event has been set. Line 798. Returning switch")
+                give_up_switch.set()
+                continue
+
+            json_data = await read_from_file(0)
+
+            if json_data:
+                # Extract information from the updated first entry in the JSON data
+                first_entry = json_data[0]
+
+                updated_estimated_time = datetime.strptime(first_entry['EstimatedTime'], "%Y-%m-%d %H:%M")
+
+                # Wait for 20 seconds if the train is late, or wait until the new estimated time
+                if updated_estimated_time > estimated_time:
+                    wait = estimated_time - datetime.now()
+                    await asyncio.sleep(max(0, wait.total_seconds()))
+
+                    logging.info("Train is late, arriving in 20 seconds")
+                else:
+                    difference = (updated_estimated_time - datetime.now()).total_seconds()
+                    logging.info("Train is planned to arrive at the estimated tine")
+                    await asyncio.sleep(max(0, difference - 20))
+
+                if wake_arrival.is_set():
+                    logging.info("Function has been woken. Line 822. Returning switch")
+                    wake_arrival.clear()
+                    give_up_switch.set()
+                    continue
+
+                # should hopefully let us change the switch
+                logging.info("Sleeping 20 seconds so we can change the switch")
+                await asyncio.sleep(20)
+
+                # Send an update that the train has now arrived
+                modbus_data_queue.put(["a", first_entry['id'], first_entry['TrackAtLocation']])
+
+                # update the json if any changes has been made
+                json_data = await read_from_file(0)
+
+                # remove train from pending arrivals
+                del json_data[0]
+                await write_to_file(json_data, 0)
+
+                # sleep 2 seconds so we can send data to the gui so it will show that the train has arrived
+                await asyncio.sleep(2)
 
 
-async def handle_train_two() -> None:
-    in_use = False
-
-    reader, writer = await asyncio.open_connection("localhost", 12345)
-
-    socket_com[1] = (writer, in_use)
-
+async def departure() -> None:
+    """Simulates control for departing trains from the train station.
+    Tries to acquire the switch so it is at the correct track and then remove the train from the list."""
     while True:
-        data = await reader.read(1024)
+        idx = 0
+        logging.info("Started departure")
+        json_data = await read_from_file(1)
 
-        if data.decode() != "Terminate":
-            modbus_data_queue.put(data)
+        if json_data:
+            first_entry = json_data[idx]
+
+            estimated_time = datetime.strptime(first_entry['EstimatedTime'], "%Y-%m-%d %H:%M")
+
+            # Calculate the time difference until the estimated departure time and sleep until 3 minutes before arrival
+            difference = estimated_time - datetime.now()
+
+            try:
+                # sleep until 2 minutes before departure or if another train departs before this
+                await asyncio.wait_for(wake_departure.wait(), timeout=max(0, difference.total_seconds() - 2 * 60))
+                wake_departure.clear()
+                logging.info("Received a wakeup call")
+                continue
+            except asyncio.TimeoutError:
+                logging.info("Timeout error")
+                pass
+
+            departure_switch_request.set()
+
+            # Put a message in the modbus_data_queue to control the switch
+            modbus_data_queue.put(["s", 0, first_entry['TrackAtLocation']])
+
+            # Wait for the departure_event signal
+            await departure_event.wait()
+            departure_event.clear()
+
+            # Check again if the train has been sent away during the waiting period
+            if wake_departure.is_set():
+                logging.info("Function has been woken 880. Returning switch")
+                wake_departure.clear()
+                give_up_switch.set()
+                continue
+
+            json_data = await read_from_file(1)
+
+            if json_data:
+                # Retrieve the updated first entry after waiting for the departure event
+                first_entry = json_data[idx]
+
+                updated_estimated_time = datetime.strptime(first_entry['EstimatedTime'], "%Y-%m-%d %H:%M")
+
+                # Check if the estimated time has been updated or if the current time is greater than the estimated time
+                if updated_estimated_time > estimated_time:
+                    logging.info("Train is late, leaving in 20 seconds")
+
+                    try:
+                        # sleep until 2 minutes before departure or if another train departs before this
+                        await asyncio.wait_for(wake_departure.wait(),
+                                               timeout=20)
+                        wake_departure.clear()
+                        give_up_switch.set()
+                        logging.info("Received a wakeup call")
+                        continue
+                    except asyncio.TimeoutError:
+                        logging.info("Timeout error")
+                        pass
+
+                    # Put a message in the modbus_data_queue to indicate train departure
+                    modbus_data_queue.put(["r", int(first_entry["TrackAtLocation"]), first_entry['id']])
+                    # give it some time to leave the station
+                    await asyncio.sleep(20)
+                    give_up_switch.set()
+                    await departure_to_data()
+                else:
+                    # Otherwise wait until the updated estimated time to leave
+                    difference = updated_estimated_time - datetime.now()
+
+                    logging.info(f"sleeping {difference} seconds")
+
+                    try:
+                        # sleep until 2 minutes before departure or if another train departs before this
+                        await asyncio.wait_for(wake_departure.wait(),
+                                               timeout=max(difference.total_seconds(), 0))
+                        wake_departure.clear()
+                        give_up_switch.set()
+                        logging.info("Received a wakeup call")
+                        continue
+                    except asyncio.TimeoutError:
+                        logging.info("Timeout error")
+                        pass
+
+                    # Put a message in the modbus_data_queue to indicate train departure
+                    modbus_data_queue.put(["r", int(first_entry["TrackAtLocation"]), first_entry['id']])
+
+                    await asyncio.sleep(20)
         else:
-            socket_com[0][1] = False
+            logging.error("No entry found in departure.json")
 
-
-async def handle_train_three() -> None:
-    in_use = False
-
-    reader, writer = await asyncio.open_connection("localhost", 12345)
-
-    socket_com[2] = (writer, in_use)
-
-    while True:
-        data = await reader.read(1024)
-
-        if data.decode() != "Terminate":
-            modbus_data_queue.put(data)
-        else:
-            socket_com[0][1] = False
-
-
-async def handle_train_four() -> None:
-    in_use = False
-
-    reader, writer = await asyncio.open_connection("localhost", 12345)
-
-    socket_com[3] = (writer, in_use)
-
-    while True:
-        data = await reader.read(1024)
-
-        if data.decode() != "Terminate":
-            modbus_data_queue.put(data)
-        else:
-            socket_com[0][1] = False
-
-
-async def handle_train_five() -> None:
-    in_use = False
-
-    reader, writer = await asyncio.open_connection("localhost", 12345)
-
-    socket_com[4] = (writer, in_use)
-
-    while True:
-        data = await reader.read(1024)
-
-        if data.decode() != "Terminate":
-            modbus_data_queue.put(data)
-        else:
-            socket_com[0][1] = False
-
-
-async def handle_train_six() -> None:
-    in_use = False
-
-    reader, writer = await asyncio.open_connection("localhost", 12345)
-
-    socket_com[5] = (writer, in_use)
-
-    while True:
-        data = await reader.read(1024)
-
-        if data.decode() != "Terminate":
-            modbus_data_queue.put(data)
-        else:
-            socket_com[0][1] = False
-
-
-async def handle_train_seven() -> None:
-    in_use = False
-
-    reader, writer = await asyncio.open_connection("localhost", 12345)
-
-    socket_com[6] = (writer, in_use)
-
-    while True:
-        data = await reader.read(1024)
-
-        if data.decode() != "Terminate":
-            modbus_data_queue.put(data)
-        else:
-            socket_com[0][1] = False
+        # sleep 0.5 seconds so we can send data to the gui so it will show that the train has departed
+        await asyncio.sleep(0.5)
 
 
 async def sensor_query() -> None:
@@ -876,131 +1028,6 @@ async def sensor_query() -> None:
                 logging.debug("sleeping for 0.5 seconds")
 
         updated_sensor.set()
-
-
-async def arrival() -> None:
-    """Simulates control for arriving trains to the train station.
-    Tries to acquire the switch, so it is at the correct track and then notifies gui when it has arrived"""
-    while True:
-        logging.info("Starting arrival function")
-        json_data = await read_from_file(0)
-
-        if json_data:
-            # Extract information from the first entry in the JSON data
-            first_entry = json_data[0]
-
-            estimated_time = datetime.strptime(first_entry['EstimatedTime'], "%Y-%m-%d %H:%M")
-
-            # Calculate the time difference between estimated time and current time
-            difference = estimated_time - datetime.now()
-
-            logging.info(f"{difference.total_seconds()} until train arrival")
-
-            try:
-                # Wait for the arrival event, with a timeout based on the estimated arrival time
-                await asyncio.wait_for(wake_arrival.wait(), timeout=max(0, difference.total_seconds() - 2 * 60))
-                wake_arrival.clear()
-                logging.info("Received a wakeup call")
-                continue
-            except asyncio.TimeoutError:
-                logging.info("TimeoutError on waiting for wakeup. Will ask for switch soon")
-                pass
-
-            # Retrieve the track number from the JSON data
-            track_number = int(first_entry['TrackAtLocation'])
-            has_changed_time = False
-
-            if track_semaphore.locked():
-                logging.info("Track semaphore was locked. Will do necessary work before waiting.")
-                departure_data = await read_from_file(1)
-                checked_trains = 0
-
-                # Find the first departing train that matches the arrival train
-                for train in departure_data:
-                    if not train['IsRemoved']:
-                        train_id = train['id']
-
-                        corresponding_arrival = next(
-                            (arrival_train for arrival_train in json_data if arrival_train['id'] == train_id),
-                            None
-                        )
-
-                        if not corresponding_arrival:
-                            first_entry['EstimatedTime'] = train['EstimatedTime']
-                            # Update the departure time for the arrival train
-                            await update_departure_time(first_entry['id'], datetime.strptime(
-                                first_entry['EstimatedTime'], "%Y-%m-%d %H:%M"), has_changed_time)
-
-                            has_changed_time = True
-                            break
-
-                        checked_trains += 1
-
-                        if checked_trains >= 6:
-                            break
-                    else:
-                        break
-
-            await track_semaphore.acquire()
-
-            if wake_arrival.is_set():
-                wake_arrival.clear()
-                track_semaphore.release()
-                logging.info("Wake arrival event has been set. Line 751")
-                continue
-
-            first_entry['EstimatedTime'] = datetime.now().strftime("%Y-%m-%d %H:%M")
-
-            # Update the departure time for the arrival train
-            await update_departure_time(first_entry['id'], datetime.now(), has_changed_time)
-
-            await write_to_file(json_data, 0)
-
-            if wake_arrival.is_set():
-                wake_arrival.clear()
-                logging.info("Wake arrival event has been set. Line 763")
-                continue
-
-            query_sensor.set()
-
-            await updated_sensor.wait()
-            updated_sensor.clear()
-
-            if track_status_sim[track_number - 1] != 0:
-                for i in range(6):
-                    if track_status_sim[i] == 0:
-                        # If the alternate track is available, occupy it and update track status
-                        logging.info("Original track wasn't available, chose another track instead")
-                        track_number = i + 1
-                        first_entry['TrackAtLocation'] = str(track_number)
-
-                        await write_to_file(json_data, 0)
-
-                        # Update the track information in departure
-                        modbus_data_queue.put(["u", first_entry['id'], str(track_number)])
-                        break
-
-            for i in range(7):
-                if not socket_com[i][2]:
-                    socket_com[i][2] = True
-
-                    socket_com[i][1].write(first_entry['EstimatedTime'].encode())
-                    await socket_com[i][1].drain()
-
-                    socket_com[i][1].write(first_entry['TrackAtLocation'].encode())
-                    await socket_com[i][1].drain()
-
-                    json_data = await read_from_file(1)
-
-                    for i in range(len(json_data)):
-                        if json_data['id'] == first_entry['id']:
-                            socket_com[i][1].write(json_data["EstimatedTime"].encode())
-                            await socket_com[i][1].drain()
-                            break
-
-                    socket_com[i][1].write(str(i).encode())
-                    await socket_com[i][1].drain()
-                    break
 
 
 def modbus_helper() -> None:
@@ -1437,6 +1464,7 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
 
     sequence_number_switch = 0
     sequence_number_gui = 0
+    sequence_number_track = 0
     rotation_switch = 0
     rotation_gui = 0
 
@@ -1487,7 +1515,6 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
     send_data.set()
     loop.create_task(send_new_entry())
     loop.create_task(arrival())
-    loop.create_task(departure())
     loop.create_task(acquire_switch(switch_queue))
 
     # wait until client has connected
@@ -1522,6 +1549,36 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
 
     derived_key = await dh_exchange(reader_gui, writer_gui)
     gui_key = base64.urlsafe_b64encode(derived_key)
+
+    while True:
+        try:
+            reader_track, writer_track = await asyncio.open_connection('localhost', 12346)
+            break  # Break out of the loop if connection is successful
+        except ConnectionRefusedError:
+            logging.info("Connection to asyncio server failed. Retrying...")
+            await asyncio.sleep(1)  # Wait for a while before retrying
+
+    logging.info("Connected to asyncio track server")
+
+    derived_key = await dh_exchange(reader_track, writer_track)
+    track_key = base64.urlsafe_b64decode(derived_key)
+
+    track_client = AsyncModbusTlsClient(
+        "localhost",
+        port=13002,
+        framer=ModbusTlsFramer,
+        certfile=cert,
+        keyfile=key,
+        server_hostname="host",
+    )
+
+    await track_client.connect()
+    # if we can't connect try again after 5 seconds, if the server hasn't been started yet
+    while not track_client.connected:
+        logging.info("Couldn't connect to track server, trying again in 5 seconds")
+        await asyncio.sleep(5)
+        await track_client.connect()
+    logging.info("Connected to track sensor server")
 
     while True:
         # Run blocking call in executor so all the other tasks can run and the server
@@ -1603,8 +1660,7 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
 
                     modbus_data_queue.put(["Z", data[2]])
 
-                    async with switch_lock:
-                        switch_status = int(data[2])
+                    switch_status = int(data[2])
                     last_acquired_switch = datetime.now()
                     modbus_data_queue.put(["S", data[2]])
                 else:
@@ -1712,19 +1768,23 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                         break
             case "t":
                 logging.info("Received track status update")
-
+                # we will send the set status to the train instead and let them handle it
                 if data[2] == "O":
                     track_status_sim[data[1] - 1] = 1
-                    await departure_to_data()
                     logging.info("Occupied track")
+
+                    modbus_data_queue.put(["J"] + data[1:])
+
                     # Just for the hmi. If all the tracks are occupied don't lock this function
                     if not track_semaphore.locked() and len(data) == 4:
                         await track_semaphore.acquire()
 
                     modbus_data_queue.put(["T", data[1], "O"])
                 else:
+                    modbus_data_queue.put(["J"] + data[1:])
                     track_status_sim[data[1] - 1] = 0
-                    await departure_to_data()
+                    await asyncio.sleep(3)
+
                     logging.info("Cleared track")
                     track_semaphore.release()
                     modbus_data_queue.put(["T", data[1], "A"])
@@ -1743,6 +1803,8 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                              json_data[i]["TrackAtLocation"]])
                         logging.info("updated track in departure file")
                         break
+
+                # write new track to train.py
 
                 await write_to_file(json_data, 1)
             case "h":
@@ -2106,6 +2168,47 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
             case "g":
                 json_data = await read_from_file(1)
                 modbus_data_queue.put(['r', int(json_data[data[1]]['TrackAtLocation']), json_data[data[1]]['id']])
+            case "J":
+                data = "X " + " ".join(str(value) for value in data[1:])
+
+                client_verified = False
+
+                while not client_verified:
+                    sequence_number_track += 1
+                    temp_signature = data + str(sequence_number_track)
+                    logging.info(temp_signature)
+                    temp_signature = hmac.new(track_key, temp_signature.encode(), hashlib.sha256).hexdigest()
+                    nonce = [char for char in secrets.token_bytes(2)]
+
+                    if sequence_number_track == 100:
+                        logging.info("Updating secret key")
+                        await update_keys(switch_key, 2)
+
+                    data_to_send = ([sequence_number_switch] + [len(data)] + [ord(char) for char in data] + [
+                            32] + nonce + [32] + [ord(char) for char in temp_signature])
+
+                    logging.debug("Sending data")
+
+                    await track_client.write_registers(0x00, data_to_send, slave=1)
+                    logging.debug("Resetting flag")
+                    await track_client.write_register(datastore_size - 2, 1, slave=1)
+
+                    expected_signature = hmac.new(track_key, str(nonce).encode(), hashlib.sha256).hexdigest()
+                    await asyncio.sleep(1.5)
+
+                    hold_register = await track_client.read_holding_registers(datastore_size - 2, 1, slave=1)
+
+                    while(hold_register.registers != [0]):
+                        await asyncio.sleep(0.3)
+                        hold_register = await track_client.read_holding_registers(datastore_size - 2, 1, slave=1)
+
+                    hold_register = await track_client.read_holding_registers(0x00, 64, slave=1)
+
+                    if hold_register.registers == expected_signature:
+                        logging.debug("Client is verified")
+                        client_verified = True
+                    else:
+                        logging.critical("Found wrong signature in holding register")
             case "Z":
                 data = "X " + " ".join(str(value) for value in data[1:])
 
