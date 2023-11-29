@@ -3,7 +3,7 @@ from flask_login import login_user, logout_user, login_required, current_user, L
 import bcrypt
 
 # flask listening on 5001
-# track_sensor modbus listening on 13000
+# track_sensor modbus listening on 13000-13005
 # track_sensor tcp listening on 13006
 # switch tcp listening on port 12344
 # hmi modbus listening on 12345
@@ -11,8 +11,11 @@ import bcrypt
 # train tcp listening on port 15000
 
 # TODO: notify the hmi and gui of the sensor data received
-
+# todo. fix nonce if it is having a space. All code expects a nonce of 2 bytes
+# todo. generate some more certs and keys so everything gets a seperate cert/key
 # TODO: hmi train will receive the wrong departure time. Sometimes when it is inbetween trains
+# TODO: maybe do something about having a already set password in the json
+# TODO: fix so we have key rotation for track_sensors
 
 import bisect
 import json
