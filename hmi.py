@@ -10,6 +10,8 @@ import bcrypt
 # gui tcp listening on 12346
 # train tcp listening on port 15000
 
+# TODO: notify the hmi and gui of the sensor data received
+
 import bisect
 import json
 from datetime import datetime, timedelta
@@ -109,7 +111,7 @@ file_secret_key = Fernet.generate_key()
 
 switch_status = 1
 
-sensor_clients = []
+
 sensor_key = b""
 sensor_requests = asyncio.Queue()
 sensor_mutex = asyncio.Lock()
@@ -366,6 +368,21 @@ def sortTimeTable(train_list):
 
 
 # ------------------------------- #
+
+async def update_track_status() -> None:
+    """Periodically queries the track sensors for their status"""
+    global sensor_requests
+
+    while True:
+        logging.info("Updating sensors")
+        if not sensor_mutex.locked():
+            with sensor_mutex:
+                await sensor_requests.put(["Y"])
+                await updated_sensor.wait()
+                updated_sensor.clear()
+
+        await asyncio.sleep(4*60)
+
 
 async def modbus_server_thread(context: ModbusServerContext) -> None:
     """Creates the server that will listen at localhost"""
@@ -686,7 +703,6 @@ async def update_arrival() -> None:
         await asyncio.sleep(10 * 60)
 
 
-# we have a problem with the acquire track semaphore
 async def arrival() -> None:
     """Simulates control for arriving trains to the train station.
     Tries to acquire the switch, so it is at the correct track and then notifies gui when it has arrived"""
@@ -769,10 +785,15 @@ async def arrival() -> None:
                 logging.info("Wake arrival event has been set. Line 763")
                 continue
 
-            logging.info("Requesting information from sensors")
-            await sensor_requests.put(["Y"])
-            await updated_sensor.wait()
-            updated_sensor.clear()
+            if not sensor_mutex.locked():
+                logging.info("Requesting information from sensors")
+                await sensor_requests.put(["Y"])
+                await updated_sensor.wait()
+                updated_sensor.clear()
+            else:
+                logging.info("Someone is already querying the sensors. Arrival don't need to query")
+                async with sensor_mutex:
+                    pass
 
             if track_status_sim[track_number - 1] == 0:
                 # If the track is available, occupy it and update track status
@@ -955,15 +976,41 @@ async def departure() -> None:
 
 
 async def sensor_comm() -> None:
+    """Handles communication with the track sensors"""
     sensor_sequence_number = 0
     global sensor_key
     global sensor_requests
+    sensor_clients = []
+    ports = [13000, 13001, 13002, 13003, 13004, 13005]
+
+    for i in range(6):
+        sensor_clients.append(AsyncModbusTlsClient(
+            "localhost",
+            port=ports[i],
+            framer=ModbusTlsFramer,
+            certfile=cert,
+            keyfile=key,
+            server_hostname="host",
+        ))
+
+        logging.info("Started client")
+
+        await sensor_clients[i].connect()
+        # if we can't connect try again after 5 seconds, if the server hasn't been started yet
+        while not sensor_clients[i].connected:
+            logging.info(f"Couldn't connect to sensor {i+1}, trying again in 5 seconds")
+            await asyncio.sleep(5)
+            await sensor_clients[i].connect()
+        logging.info(f"Connected to sensor {i+1}")
 
     while True:
         t = await sensor_requests.get()
 
+        logging.info("Received data")
+
         if t[0] == "Y":
             for i in range(6):
+                logging.info(f"Querying sensor {i+1}")
                 data = "Y"
                 sensor_sequence_number += 1
                 temp_signature = data + str(sensor_sequence_number)
@@ -995,16 +1042,32 @@ async def sensor_comm() -> None:
                             calc_signature = hmac.new(sensor_key, str(calc_signature).encode(), hashlib.sha256).hexdigest()
 
                             if signature == [ord(char) for char in calc_signature]:
-                                logging.info("Verified signature on data. Checking request")
+                                logging.info("Verified signature on data. Checking received status")
                                 verified = True
-                                track_status_sim[i] = track_status
+
+                                if track_status_sim[i] != track_status and track_status_sim == 0:
+                                    # just a check so we don't try to acquire the semaphore from the hmi at the same
+                                    # time
+
+                                    modbus_data_queue.put(["T", str(i), "O"])
+
+                                    if not track_semaphore.locked():
+                                        await track_semaphore.acquire()
+                                elif track_status_sim[i] != track_status and track_status_sim == 1:
+                                    track_semaphore.release()
+                                    modbus_data_queue.put(["T", str(i), "A"])
                             else:
                                 logging.critical("Wrong signature found in modbus register")
                         else:
                             logging.error("Error reading holding register")
 
                     logging.debug("sleeping for 0.5 seconds")
+
+                    logging.info(f"Finished querying sensor {i+1}")
+
+            updated_sensor.set()
         else:
+            logging.info("Changing status of the sensors")
             data = "X " + " ".join(str(value) for value in t[1])
 
             client_verified = False
@@ -1045,11 +1108,6 @@ async def sensor_comm() -> None:
                     client_verified = True
                 else:
                     logging.critical("Found wrong signature in holding register")
-
-        if sensor_sequence_number > 100:
-            await update_keys(sensor_key, 2)
-
-        updated_sensor.set()
 
 
 def modbus_helper() -> None:
@@ -1380,6 +1438,7 @@ async def send_new_entry() -> None:
 
 async def dh_exchange(reader: asyncio.StreamReader,
                                writer: asyncio.StreamWriter) -> bytes:
+    """Handles basic diffie hellman exchange in group 14"""
     p = 0xFFFFFFFFFFFFFFFFC90FDAA22168C234C4C6628B80DC1CD129024E088A67CC74020BBEA63B139B22514A08798E3404DDEF9519B3CD3A431B302B0A6DF25F14374FE1356D6D51C245E485B576625E7EC6F44C42E9A637ED6B0BFF5CB6F406B7EDEE386BFB5A899FA5AE9F24117C4B1FE649286651ECE45B3DC2007CB8A163BF0598DA48361C55D39A69163FA8FD24CF5F83655D23DCA3AD961C62F356208552BB9ED529077096966D670C354E4ABC9804F1746C08CA18217C32905E462E36CE3BE39E772C180E86039B2783A2EC07A28FB5C55DF06F4C52C9DE2BCBF6955817183995497CEA956AE515D2261898FA051015728E5A8AACAA68FFFFFFFFFFFFFFFF
     g = 2
 
@@ -1774,7 +1833,7 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                             logging.info("Woke departure function")
 
                         if has_arrived:
-                            switch_status, sequence_number_switch = get_switch_status(context, switch_key, sequence_number_switch)
+                            switch_status, sequence_number_switch = await get_switch_status(context, switch_key, sequence_number_switch)
 
                             if switch_status != data[1]:
                                 logging.error("The train derailed when it tried to leave the station")
