@@ -12,6 +12,8 @@ import bcrypt
 
 # TODO: notify the hmi and gui of the sensor data received
 
+# TODO: hmi train will receive the wrong departure time. Sometimes when it is inbetween trains
+
 import bisect
 import json
 from datetime import datetime, timedelta
@@ -1023,6 +1025,8 @@ async def sensor_comm() -> None:
                 await sensor_clients[i].write_registers(0x00, data_to_send, slave=1)
                 await sensor_clients[i].write_register(datastore_size - 2, 1, slave=1)
 
+                logging.info("wrote data")
+
                 verified = False
 
                 while not verified:
@@ -1041,6 +1045,9 @@ async def sensor_comm() -> None:
 
                             calc_signature = hmac.new(sensor_key, str(calc_signature).encode(), hashlib.sha256).hexdigest()
 
+                            logging.info(signature)
+                            logging.info(calc_signature)
+
                             if signature == [ord(char) for char in calc_signature]:
                                 logging.info("Verified signature on data. Checking received status")
                                 verified = True
@@ -1048,7 +1055,6 @@ async def sensor_comm() -> None:
                                 if track_status_sim[i] != track_status and track_status_sim == 0:
                                     # just a check so we don't try to acquire the semaphore from the hmi at the same
                                     # time
-
                                     modbus_data_queue.put(["T", str(i), "O"])
 
                                     if not track_semaphore.locked():
@@ -1063,7 +1069,7 @@ async def sensor_comm() -> None:
 
                     logging.debug("sleeping for 0.5 seconds")
 
-                    logging.info(f"Finished querying sensor {i+1}")
+                logging.info(f"Finished querying sensor {i+1}")
 
             updated_sensor.set()
         else:
@@ -1735,7 +1741,7 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
 
                 if switch_status != int(data[2]):
                     logging.info("Updating track in json, due to switch status being different to expected track")
-
+                    modbus_data_queue.put(["S", str(switch_status)])
                     modbus_data_queue.put(["u", data[1], str(switch_status)])
 
                 modbus_data_queue.put(["H", str(switch_status)])
@@ -2340,6 +2346,7 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
 
 
 def choose_characters(secret: bytes) -> str:
+    """Chose a few random characters"""
     hash_object = hashlib.sha256(secret)
     hash_hex = hash_object.hexdigest()
 
