@@ -3,7 +3,7 @@ from flask_login import login_user, logout_user, login_required, current_user, L
 import bcrypt
 
 # flask listening on 5001
-# track_sensor modbus listening on 13000
+# track_sensor modbus listening on 13000-13005
 # track_sensor tcp listening on 13006
 # switch tcp listening on port 12344
 # hmi modbus listening on 12345
