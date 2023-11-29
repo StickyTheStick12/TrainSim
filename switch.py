@@ -33,8 +33,8 @@ logging.getLogger().addHandler(file_handler)
 
 # Modbus variables
 datastore_size = 95  # needs to be the same size as the server, max 125 though
-cert = os.path.join(os.getcwd(), "TLS", "cert.pem")
-key = os.path.join(os.getcwd(), "TLS", "key.pem")
+cert = os.path.join(os.getcwd(), "TLS", "switch_cert.pem")
+key = os.path.join(os.getcwd(), "TLS", "switch_key.pem")
 host = "localhost"
 port = 12345
 
