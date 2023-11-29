@@ -36,6 +36,19 @@ sequence_number = 0
 
 secret_key = b""
 
+try:
+    os.remove(os.path.join(os.getcwd(), "logs", "track_sensor.log"))
+except FileNotFoundError:
+    pass
+
+# Configure the logger
+logging.basicConfig(format='%(asctime)s - %(levelname)s - %(funcName)s - %(message)s', level=logging.INFO)
+
+# Create a FileHandler to write log messages to a file
+file_handler = logging.FileHandler(os.path.join(os.getcwd(), "logs", 'track_sensor.log'))
+file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(funcName)s - %(message)s'))
+logging.getLogger().addHandler(file_handler)
+
 
 async def handle_server() -> None:
     async def receive_key(reader: asyncio.StreamReader,
@@ -185,6 +198,8 @@ async def answer_client(idx: int, context: ModbusServerContext) -> None:
     signature = received_data[1 + amount_to_read + 3:]
     data = received_data[:amount_to_read].split(" ")
 
+    logging.info(data)
+
     if not data_id > sequence_number:
         return
 
@@ -216,7 +231,9 @@ async def answer_client(idx: int, context: ModbusServerContext) -> None:
 
             calc_signature = hmac.new(secret_key, str(data_to_send).encode(), hashlib.sha256).hexdigest()
 
-            calc_signature = [lst_of_statuses] + [ord(char) for char in calc_signature]
+            calc_signature = [lst_of_statuses[idx]] + [ord(char) for char in calc_signature]
+
+            logging.info(calc_signature)
 
             context[0x00].setValues(3, 0x00, calc_signature)
 
@@ -227,7 +244,7 @@ async def answer_client(idx: int, context: ModbusServerContext) -> None:
 async def run_modbus(lst_of_contexts: list) -> None:
     while True:
         for i in range(6):
-            if lst_of_contexts[i][0x00].getValues(3, datastore_size - 2, 1) == [0]:
+            if lst_of_contexts[i][0x00].getValues(3, datastore_size - 2, 1) == [1]:
                 await answer_client(i, lst_of_contexts[i])
 
             await asyncio.sleep(0.3)
