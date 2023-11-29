@@ -10,7 +10,6 @@ import bcrypt
 # gui tcp listening on 12346
 # train tcp listening on port 15000
 
-import modules as SQL
 import bisect
 import json
 from datetime import datetime, timedelta
@@ -133,23 +132,21 @@ class Users(UserMixin):
 
 @login_manager.user_loader
 def loader_user(user_id):
-    # Här måste vi löser ett säkrare sätt
-    authenticate = SQL.checkAuthentication()
-
-    user = Users(authenticate[0], authenticate[1])
+    credentials = open_json("usercredentials.json")
+    user = Users(credentials["username"], credentials["password"])
     return user
 
 
 @app.route('/', methods=["POST", "GET"])
 def loginPage(invalid=False):
     if request.method == "POST":
-        authenticate = SQL.checkAuthentication()
 
         # Här får vi data från loginet. Gör backend saker som kontroller etc
         user_credentials = {'username': request.form["username"], 'password': request.form["pwd"]}
         user = Users(user_credentials['username'], user_credentials['password'])
+        credentials = open_json("usercredentials.json")
 
-        if user.username == authenticate[0] and bcrypt.checkpw(user.password.encode(), authenticate[1].encode()):
+        if user.username == credentials["username"] and bcrypt.checkpw(user.password.encode(), credentials["password"].encode()):
             login_user(user)
             session['username'] = user.username
             json_data = open_json("data.json")
@@ -215,7 +212,6 @@ def logOutUser():
     logout_user()
     json_data = open_json("data.json")
     json_data = logData(json_data, "User logout", session['username'])
-    print(json_data)
     writeToJson("data.json", json_data)
     return redirect(url_for("loginPage"))
 
@@ -774,7 +770,7 @@ async def arrival() -> None:
                 continue
 
             logging.info("Requesting information from sensors")
-            await sensor_requests.put(["y"])
+            await sensor_requests.put(["Y"])
             await updated_sensor.wait()
             updated_sensor.clear()
 
@@ -2304,6 +2300,5 @@ if __name__ == '__main__':
     modbus_process.start()
 
     app.run(ssl_context=(cert, key), debug=False, port=5001)
-    SQL.closeSession()
 
     modbus_process.join()
