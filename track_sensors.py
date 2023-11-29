@@ -189,7 +189,7 @@ async def answer_client(idx: int, context: ModbusServerContext) -> None:
 
     hold_register = context[0x00].getValues(3, 0x00, datastore_size - 3)
     data_id = hold_register[0]
-    amount_to_read = hold_register[0]
+    amount_to_read = hold_register[1]
 
     received_data = "".join(chr(char) for char in hold_register[2:2 + amount_to_read + 1
                                                                   + 2 + 1 + 64])
@@ -197,8 +197,6 @@ async def answer_client(idx: int, context: ModbusServerContext) -> None:
     nonce = received_data[1 + amount_to_read:1 + amount_to_read + 2]
     signature = received_data[1 + amount_to_read + 3:]
     data = received_data[:amount_to_read].split(" ")
-
-    logging.info(data)
 
     if not data_id > sequence_number:
         return
@@ -233,18 +231,21 @@ async def answer_client(idx: int, context: ModbusServerContext) -> None:
 
             calc_signature = [lst_of_statuses[idx]] + [ord(char) for char in calc_signature]
 
-            logging.info(calc_signature)
-
             context[0x00].setValues(3, 0x00, calc_signature)
 
-        logging.info("Resetting flag")
-        context[0x00].setValues(3, datastore_size - 2, [0])
+            logging.info("Resetting flag")
+            context[0x00].setValues(3, datastore_size - 2, [0])
+
+    else:
+        logging.error("Wrong signature")
+
 
 
 async def run_modbus(lst_of_contexts: list) -> None:
     while True:
         for i in range(6):
             if lst_of_contexts[i][0x00].getValues(3, datastore_size - 2, 1) == [1]:
+                logging.info(i)
                 await answer_client(i, lst_of_contexts[i])
 
             await asyncio.sleep(0.3)
@@ -284,5 +285,6 @@ def modbus_helper() -> None:
     lst_of_contexts = [context1, context2, context3, context4, context5, context6]
 
     loop.run_until_complete(run_modbus(lst_of_contexts))
+
 
 modbus_helper()
