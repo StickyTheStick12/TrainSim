@@ -27,27 +27,14 @@ from cryptography.fernet import Fernet
 datastore_size = 95  # cant be bigger than 125
 modbus_port = 13000
 
-cert = os.path.join(os.getcwd(), "TLS", "cert.pem")
-key = os.path.join(os.getcwd(), "TLS", "key.pem")
+cert = os.path.join(os.getcwd(), "TLS", "track_cert.pem")
+key = os.path.join(os.getcwd(), "TLS", "track_key.pem")
 
 lst_of_statuses = [0]*6
 
 sequence_number = 0
 
 secret_key = b""
-
-try:
-    os.remove(os.path.join(os.getcwd(), "logs", "track_sensor.log"))
-except FileNotFoundError:
-    pass
-
-# Configure the logger
-logging.basicConfig(format='%(asctime)s - %(levelname)s - %(funcName)s - %(message)s', level=logging.INFO)
-
-# Create a FileHandler to write log messages to a file
-file_handler = logging.FileHandler(os.path.join(os.getcwd(), "logs", 'track_sensor.log'))
-file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(funcName)s - %(message)s'))
-logging.getLogger().addHandler(file_handler)
 
 
 async def handle_server() -> None:
@@ -189,7 +176,7 @@ async def answer_client(idx: int, context: ModbusServerContext) -> None:
 
     hold_register = context[0x00].getValues(3, 0x00, datastore_size - 3)
     data_id = hold_register[0]
-    amount_to_read = hold_register[1]
+    amount_to_read = hold_register[0]
 
     received_data = "".join(chr(char) for char in hold_register[2:2 + amount_to_read + 1
                                                                   + 2 + 1 + 64])
@@ -229,23 +216,18 @@ async def answer_client(idx: int, context: ModbusServerContext) -> None:
 
             calc_signature = hmac.new(secret_key, str(data_to_send).encode(), hashlib.sha256).hexdigest()
 
-            calc_signature = [lst_of_statuses[idx]] + [ord(char) for char in calc_signature]
+            calc_signature = [lst_of_statuses] + [ord(char) for char in calc_signature]
 
             context[0x00].setValues(3, 0x00, calc_signature)
 
-            logging.info("Resetting flag")
-            context[0x00].setValues(3, datastore_size - 2, [0])
-
-    else:
-        logging.error("Wrong signature")
-
+        logging.info("Resetting flag")
+        context[0x00].setValues(3, datastore_size - 2, [0])
 
 
 async def run_modbus(lst_of_contexts: list) -> None:
     while True:
         for i in range(6):
-            if lst_of_contexts[i][0x00].getValues(3, datastore_size - 2, 1) == [1]:
-                logging.info(i)
+            if lst_of_contexts[i][0x00].getValues(3, datastore_size - 2, 1) == [0]:
                 await answer_client(i, lst_of_contexts[i])
 
             await asyncio.sleep(0.3)
@@ -285,6 +267,5 @@ def modbus_helper() -> None:
     lst_of_contexts = [context1, context2, context3, context4, context5, context6]
 
     loop.run_until_complete(run_modbus(lst_of_contexts))
-
 
 modbus_helper()
