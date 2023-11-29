@@ -267,3 +267,6 @@ def modbus_helper() -> None:
     lst_of_contexts = [context1, context2, context3, context4, context5, context6]
 
     loop.run_until_complete(run_modbus(lst_of_contexts))
+
+
+modbus_helper()
