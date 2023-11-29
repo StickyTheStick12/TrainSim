@@ -1,7 +1,7 @@
 ## Dependencies
 aiohttp == 3.9.1 <br/>
 bcrypt == 3.2.0<br/>
-cryptography==41.0.5<br/>
+cryptography==41.0.6<br/>
 customtkinter == 5.2.0<br/>
 flask == 2.3.3<br/>
 flask-login == 0.6.2 <br/>
