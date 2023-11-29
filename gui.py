@@ -1,22 +1,15 @@
 import customtkinter as ctk
-from pymodbus.client import AsyncModbusTlsClient
-from pymodbus.transaction import ModbusTlsFramer
-from pymodbus.exceptions import ModbusException
-
 from PIL import Image, ImageTk
 
+import struct
 import asyncio
 import logging
 import multiprocessing
 import hmac
 import hashlib
 import base64
-import os
-import time
-import sys
 import random
-import struct
-exit_event = asyncio.Event()
+import os
 
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes
@@ -25,21 +18,23 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import dh
 from cryptography.fernet import Fernet
 
+try:
+    os.remove(os.path.join(os.getcwd(), "logs", "GUI.log"))
+except FileNotFoundError:
+    pass
+
+# Configure the logger
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(funcName)s - %(message)s', level=logging.INFO)
-_logger = logging.getLogger(__file__)
 
-# Modbus variables
-datastore_size = 124  # needs to be the same size as the server, max 125 though
-cwd = os.getcwd()
-path_to_cert = f"{cwd}/cert.pem"
-path_to_key = f"{cwd}/key.pem"
-host = "localhost"
-port = 12345
+# Create a FileHandler to write log messages to a file
+file_handler = logging.FileHandler(os.path.join(os.getcwd(), "logs", 'GUI.log'))
+file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(funcName)s - %(message)s'))
+logging.getLogger().addHandler(file_handler)
 
+exit_event = asyncio.Event()
 
 
 class TrainStation(ctk.CTk):
-
     def __init__(self):
         super().__init__()
         ctk.set_appearance_mode("dark")
@@ -53,7 +48,6 @@ class TrainStation(ctk.CTk):
 
         # Data containers
         self.timetable_data = []
-        self.timetable_labels = []
         self.track_indicators = []
         self.track_canvases = []
         # nested list represent what track the train/trains are on
@@ -74,17 +68,17 @@ class TrainStation(ctk.CTk):
         self.tracks_frame = ctk.CTkFrame(self, fg_color="transparent")
         self.tracks_frame.grid(row=0, column=1, sticky="nsew")
 
-        # Create the grid in the timetable frame and input labels on each row for future data
+        # Create the grid in the timetable frame
         for c in range(3):
             self.timetable_frame.grid_columnconfigure(c, weight=1)
-        for r in range(10):
+        for r in range(25):
             self.timetable_frame.grid_rowconfigure(r, weight=1)
 
         # Create the grid in the tracks frame
         for c in range(6):
             self.tracks_frame.grid_columnconfigure(c, weight=1)
 
-        self.image = Image.open(f"{cwd}/train.png")
+        self.image = Image.open(os.path.join(os.getcwd(), "train.png"))
         self.image = self.image.resize((50, 140))
         self.image = ImageTk.PhotoImage(self.image)
 
@@ -96,31 +90,21 @@ class TrainStation(ctk.CTk):
 
         self.current_switch_location = 1
 
-
     def create_timetable_layout(self):
         """Create the timetable layout in the timetable frame"""
         # Create labels for each header
-        timetable_label = ctk.CTkLabel(self.timetable_frame, text="       Timetable", font=self.title_font)
-        train_label = ctk.CTkLabel(self.timetable_frame, text="Departure", font=self.subtitle_font)
-        track_label = ctk.CTkLabel(self.timetable_frame, text="Destination", font=self.subtitle_font)
-        departure_label = ctk.CTkLabel(self.timetable_frame, text="Track", font=self.subtitle_font)
+        timetable_label = ctk.CTkLabel(self.timetable_frame, text="Timetable", font=self.title_font,
+                                       corner_radius=6)
+        train_label = ctk.CTkLabel(self.timetable_frame, text="Departure", font=self.subtitle_font, corner_radius=3)
+        track_label = ctk.CTkLabel(self.timetable_frame, text="Destination", font=self.subtitle_font,
+                                   corner_radius=3)
+        departure_label = ctk.CTkLabel(self.timetable_frame, text="Track", font=self.subtitle_font, corner_radius=3)
 
         # Put the labels in the timetable frame's grid
-        timetable_label.grid(row=0, column=0, columnspan=3, sticky="n", pady = 10)
-        train_label.grid(row=1, column=0, sticky="n")
+        timetable_label.grid(row=0, column=0, columnspan=3, sticky="n", pady=10)
+        train_label.grid(row=1, column=0, sticky="n", padx=20)
         track_label.grid(row=1, column=1, sticky="n")
         departure_label.grid(row=1, column=2, sticky="n")
-
-        # create labels and plot them in the timetable frame's grid for future data
-        for row in range(8):
-            train_label = ctk.CTkLabel(self.timetable_frame, text="", font=self.text_font)
-            track_label = ctk.CTkLabel(self.timetable_frame, text="", font=self.text_font)
-            departure_label = ctk.CTkLabel(self.timetable_frame, text="", font=self.text_font)
-            train_label.grid(row = row + 2, column=0)
-            track_label.grid(row = row + 2, column=1)
-            departure_label.grid(row = row + 2, column=2)
-            self.timetable_labels.append([train_label, track_label, departure_label])
-
 
     def create_track_layout(self):
         """Create the track layout in the tracks frame"""
@@ -156,7 +140,6 @@ class TrainStation(ctk.CTk):
             track_switch_canvas.grid(row=3, column=i, pady=10)
             self.track_switch_canvases.append(track_switch_canvas)
 
-
     def track_switch(self, track_switch):
         """create a track switch that points at a specific track"""
         old_switch_canvas = self.track_switch_canvases[self.current_switch_location - 1]
@@ -167,7 +150,6 @@ class TrainStation(ctk.CTk):
         track_switch_canvas.create_line(50, 60, 50, 20, fill="pink", width=5)
         track_switch_canvas.create_text(50, 70, text="Track switch", font=self.text_font, fill="pink")
         self.current_switch_location = track_switch
-
 
     def create_train(self, track):
         """Creates a train on a given track(1-6) outside the train station"""
@@ -182,7 +164,6 @@ class TrainStation(ctk.CTk):
         # Move the created train in to the train station
         self.move_train_to_station(track, train)
 
-
     def create_train_in_station(self, track):
         """Creates a train on a given track(1-6) positioned in the train station"""
         # Track index in the list (0 - 5)
@@ -196,7 +177,6 @@ class TrainStation(ctk.CTk):
         # Append it to the nested list of trains in a given track
         self.trains[track_index].append([train])
 
-
     def move_train_to_station(self, track, train_object):
         """Moves a given train object on a given track to the train station"""
         # Get the given track's canvas
@@ -206,27 +186,22 @@ class TrainStation(ctk.CTk):
         y0 = 450
         self.train_arrive(track, track_canvas, train_object, y0)
 
-
     def train_arrive(self, track, track_canvas, train_object, current_y):
         """Move train to the train station by calling itself and updating current y-value"""
         if len(self.trains[track - 1]) > 1:  # if multiple trains are on the same track
             if current_y > 220:  # If train hasn't reached the station yet
-                # Move the train up
-                track_canvas.move(train_object, 0, -2)
-                # Schedule next move after 100 milliseconds
+                track_canvas.move(train_object, 0, -2)  # Move the train up
                 self.after(100, self.train_arrive, track, track_canvas, train_object,
-                           current_y - 2)
+                           current_y - 2)  # Schedule next move after 50 milliseconds
             else:  # When train arrive
-                # crash animation
-                self.crash(track)
+                self.crash(track)  # multiple trains on the track result in a crash
         else:  # Only one train is on the given track
             if current_y > 80:  # If train hasn't reached the station yet
                 track_canvas.move(train_object, 0, -2)  # Move the train up
                 self.after(100, self.train_arrive, track, track_canvas, train_object,
-                           current_y - 2)  # Schedule next move after 100 milliseconds
+                           current_y - 2)  # Schedule next move after 50 milliseconds
             else:  # When train arrive
                 self.track_indicator_update(track, "O")  # Update track indicator to occupied
-
 
     def move_train_from_station(self, track, train_number):
         """Moves a given train on a given track out of the train station"""
@@ -242,7 +217,6 @@ class TrainStation(ctk.CTk):
         # Call iterative function that call itself for the sole purpose to move object
         self.train_depart(track_index, track_canvas, train_index, train_object, y0)
 
-
     def train_depart(self, track_index, track_canvas, train_index, train_object, current_y):
         """Move train out of the train station by calling itself and updating current y-value"""
         if current_y < 520:  # If train hasn't exit the station yet
@@ -253,42 +227,50 @@ class TrainStation(ctk.CTk):
             self.track_indicator_update(track_index + 1, "A")  # Update the track indicator to available
             self.trains = self.trains[track_index].pop(train_index)  # Remove the train from the trains list
 
-
     def add_data_timetable(self, index, data):
         """Add a train in the timetable"""
         self.timetable_data.insert(index, data)
-        self.plot_data_timetable(index)
+        # Remove all the old data in the timetable frame
+        for obj in self.timetable_frame.winfo_children():
+            obj.grid_forget()
+        # Create the timetable layout in timetable frame
+        self.create_timetable_layout()
 
-
-    def plot_data_timetable(self, index):
-        '''Plot data in the timetable'''
-        for current_row in range(index, len(self.timetable_data)):
-            data = self.timetable_data[current_row]
+        # Plot the new data in the timetable
+        for current_row, data in enumerate(self.timetable_data, start=2):
             train, track, departure = data
-            train_label = self.timetable_labels[current_row][0]
-            track_label = self.timetable_labels[current_row][1]
-            departure_label = self.timetable_labels[current_row][2]
-            train_label.configure(text = train)
-            track_label.configure(text = track)
-            departure_label.configure(text = departure)
 
+            train_label = ctk.CTkLabel(self.timetable_frame, text=train, font=self.text_font)
+            track_label = ctk.CTkLabel(self.timetable_frame, text=track, font=self.text_font)
+            departure_label = ctk.CTkLabel(self.timetable_frame, text=departure, font=self.text_font)
+
+            train_label.grid(row=current_row, column=0, padx=20)
+            track_label.grid(row=current_row, column=1)
+            departure_label.grid(row=current_row, column=2)
 
     def remove_data_timetable(self, index):
-        """Remove a train from the timetable"""
+        """Remove a train from the timetaacble"""
+
+        # If the row(index) exist in timetable
         if 0 <= index < len(self.timetable_data):
-            # wipe the last row of the grid to later re plot the data
-            last_row_index = len(self.timetable_data) + 2
-            train_label, track_label, departure_label = self.timetable_labels[last_row_index]
-            train_label.configure(text="")
-            track_label.configure(text="")
-            departure_label.configure(text="")
+            self.timetable_data.pop(index)  # Remove the data on the given index
 
-            # remove the given row from the list of timetable data
-            self.timetable_data.pop(index)
+            for obj in self.timetable_frame.winfo_children():  # Wipe the frame
+                obj.grid_forget()
 
-            # replot the timetable with the up to date list of timetable data
-            self.plot_data_timetable(index)
+            self.create_timetable_layout()  # Create the timetable layout
 
+            for current_row, data in enumerate(self.timetable_data,
+                                               start=2):  # Plot the updated data to the timetable
+                train, track, departure = data
+
+                train_label = ctk.CTkLabel(self.timetable_frame, text=train, font=self.text_font)
+                track_label = ctk.CTkLabel(self.timetable_frame, text=track, font=self.text_font)
+                departure_label = ctk.CTkLabel(self.timetable_frame, text=departure, font=self.text_font)
+
+                train_label.grid(row=current_row, column=0, padx=20)
+                track_label.grid(row=current_row, column=1)
+                departure_label.grid(row=current_row, column=2)
 
     def track_indicator_update(self, track_number, status):
         """Update a given track's(1-6) indicator"""
@@ -302,18 +284,12 @@ class TrainStation(ctk.CTk):
         else:
             track_status.config(bg="green")  # Set the indicator to green(available)
 
-
     def crash(self, track):
-        """Crash animation"""
+        """Crash simulation"""
         track_index = track - 1
         train_canvas = self.track_canvases[track_index]
         train_canvas.create_oval(0, 100, 100, 200,
                                  fill="orange")  # Create the explosion between the train in the station and the train moving towards the station
-        crash_label = ctk.CTkLabel(self.tracks_frame, text = "Crash occured", font = ctk.CTkFont(size = 48), corner_radius = 6)
-        crash_label.grid(row = 2, column = 0, columnspan = 6)
-        time.sleep(30)
-        sys.exit()        
-
 
     def process_modbus_data(self) -> None:
         if not modbus_data_queue.empty():
@@ -346,7 +322,8 @@ class TrainStation(ctk.CTk):
                 case "C":
                     self.create_train_in_station(int(data[1]))
 
-        self.after(1000, self.process_modbus_data)
+        self.after(500, self.process_modbus_data)
+
 
 def modbus_client_thread() -> None:
     """This thread will start the modbus client and connect to the server"""
