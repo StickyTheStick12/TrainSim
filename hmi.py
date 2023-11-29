@@ -84,7 +84,6 @@ give_up_switch = asyncio.Event()
 
 track_semaphore = asyncio.Semaphore(value=6)
 track_status_sim = [0] * 6  # this is the track_status that the trains use when deciding on a track.
-query_sensor = asyncio.Event()
 updated_sensor = asyncio.Event()
 
 switch_lock = asyncio.Lock()
@@ -108,11 +107,12 @@ login_manager.init_app(app)
 departure_file_version = 0
 arrival_file_version = 0
 file_secret_key = Fernet.generate_key()
+
 switch_status = 1
 
-train_writer = None
-used_trains = [0]*7
 sensor_clients = []
+sensor_key = b""
+sensor_requests = asyncio.Queue()
 sensor_mutex = asyncio.Lock()
 
 
@@ -690,6 +690,7 @@ async def update_arrival() -> None:
         await asyncio.sleep(10 * 60)
 
 
+# we have a problem with the acquire track semaphore
 async def arrival() -> None:
     """Simulates control for arriving trains to the train station.
     Tries to acquire the switch, so it is at the correct track and then notifies gui when it has arrived"""
@@ -772,7 +773,8 @@ async def arrival() -> None:
                 logging.info("Wake arrival event has been set. Line 763")
                 continue
 
-            query_sensor.set()
+            logging.info("Requesting information from sensors")
+            await sensor_requests.put(["y"])
             await updated_sensor.wait()
             updated_sensor.clear()
 
@@ -956,76 +958,100 @@ async def departure() -> None:
         await asyncio.sleep(0.5)
 
 
-async def sensor_query() -> None:
-    sequence_number = 0
-    
-    reader, writer = await asyncio.open_connection("localhost", 12345)
-    derived_key = await dh_exchange(reader, writer)
-    sensor_key = base64.urlsafe_b64encode(derived_key)
-
-    for i in range(6):
-        sensor_clients.append(AsyncModbusTlsClient(
-            "localhost",
-            port=13002,
-            framer=ModbusTlsFramer,
-            certfile=cert,
-            keyfile=key,
-            server_hostname="host",
-        ))
-
-    for i in range(6):
-        sensor_clients[i].connect()
-
-        while not sensor_clients[i].connected:
-            logging.info("Couldn't connect to server, trying again in 5 seconds")
-            await asyncio.sleep(5)
-            await sensor_clients[i].connect()
+async def sensor_comm() -> None:
+    sensor_sequence_number = 0
+    global sensor_key
+    global sensor_requests
 
     while True:
-        await query_sensor.wait()
-        query_sensor.clear()
+        t = await sensor_requests.get()
 
-        for i in range(6):
-            data = "Y"
-            sequence_number += 1
-            temp_signature = data + str(sequence_number)
-            temp_signature = hmac.new(sensor_key, temp_signature.encode(), hashlib.sha256).hexdigest()
-            nonce = [char for char in secrets.token_bytes(2)]
+        if t[0] == "Y":
+            for i in range(6):
+                data = "Y"
+                sensor_sequence_number += 1
+                temp_signature = data + str(sensor_sequence_number)
+                temp_signature = hmac.new(sensor_key, temp_signature.encode(), hashlib.sha256).hexdigest()
+                nonce = [char for char in secrets.token_bytes(2)]
 
-            data_to_send = ([sequence_number] + [len(data)] + [ord(char) for char in data] + [32] + nonce +
-                            [32] + [ord(char) for char in temp_signature])
+                data_to_send = ([sensor_sequence_number] + [len(data)] + [ord(char) for char in data] + [32] + nonce +
+                                [32] + [ord(char) for char in temp_signature])
 
-            await sensor_clients[i].write_registers(0x00, data_to_send, slave=1)
-            await sensor_clients[i].write_register(datastore_size - 2, 1, slave=1)
+                await sensor_clients[i].write_registers(0x00, data_to_send, slave=1)
+                await sensor_clients[i].write_register(datastore_size - 2, 1, slave=1)
 
-            verified = False
+                verified = False
 
-            while not verified:
-                await asyncio.sleep(0.5)
+                while not verified:
+                    await asyncio.sleep(0.5)
 
-                hold_register = await sensor_clients[i].read_holding_registers(datastore_size - 2, 1, slave=1)
+                    hold_register = await sensor_clients[i].read_holding_registers(datastore_size - 2, 1, slave=1)
 
-                if hold_register.registers == [0]:
-                    hold_register = await sensor_clients[i].read_holding_registers(0x00, 65, slave=1)
+                    if hold_register.registers == [0]:
+                        hold_register = await sensor_clients[i].read_holding_registers(0x00, 65, slave=1)
 
-                    if not hold_register.isError():
-                        track_status = hold_register.registers[0]
-                        signature = hold_register.registers[1:]
+                        if not hold_register.isError():
+                            track_status = hold_register.registers[0]
+                            signature = hold_register.registers[1:]
 
-                        calc_signature = [track_status] + [nonce]
+                            calc_signature = [track_status] + [nonce]
 
-                        calc_signature = hmac.new(sensor_key, str(calc_signature).encode(), hashlib.sha256).hexdigest()
+                            calc_signature = hmac.new(sensor_key, str(calc_signature).encode(), hashlib.sha256).hexdigest()
 
-                        if signature == [ord(char) for char in calc_signature]:
-                            logging.info("Verified signature on data. Checking request")
-                            verified = True
-                            track_status_sim[i] = track_status
+                            if signature == [ord(char) for char in calc_signature]:
+                                logging.info("Verified signature on data. Checking request")
+                                verified = True
+                                track_status_sim[i] = track_status
+                            else:
+                                logging.critical("Wrong signature found in modbus register")
                         else:
-                            logging.critical("Wrong signature found in modbus register")
-                    else:
-                        logging.error("Error reading holding register")
+                            logging.error("Error reading holding register")
 
-                logging.debug("sleeping for 0.5 seconds")
+                    logging.debug("sleeping for 0.5 seconds")
+        else:
+            data = "X " + " ".join(str(value) for value in t[1])
+
+            client_verified = False
+
+            while not client_verified:
+                sensor_sequence_number += 1
+                temp_signature = data + str(sensor_sequence_number)
+                logging.info(temp_signature)
+                temp_signature = hmac.new(sensor_key, temp_signature.encode(), hashlib.sha256).hexdigest()
+                nonce = [char for char in secrets.token_bytes(2)]
+
+                if sensor_sequence_number == 100:
+                    logging.info("Updating secret key")
+                    # await update_keys(sensor_key, 2)
+
+                data_to_send = ([sensor_sequence_number] + [len(data)] + [ord(char) for char in data] + [
+                    32] + nonce + [32] + [ord(char) for char in temp_signature])
+
+                logging.debug("Sending data")
+
+                await sensor_clients[int(t[1])-1].write_registers(0x00, data_to_send, slave=1)
+                logging.debug("Resetting flag")
+                await sensor_clients[int(t[1])-1].write_register(datastore_size - 2, 1, slave=1)
+
+                expected_signature = hmac.new(sensor_key, str(nonce).encode(), hashlib.sha256).hexdigest()
+                await asyncio.sleep(1.5)
+
+                hold_register = await sensor_clients[int(t[1])-1].read_holding_registers(datastore_size - 2, 1, slave=1)
+
+                while hold_register.registers != [0]:
+                    await asyncio.sleep(0.3)
+                    hold_register = await sensor_clients[int(t[1])-1].read_holding_registers(datastore_size - 2, 1, slave=1)
+
+                hold_register = await sensor_clients[int(t[1])-1].read_holding_registers(0x00, 64, slave=1)
+
+                if hold_register.registers == expected_signature:
+                    logging.debug("Client is verified")
+                    client_verified = True
+                else:
+                    logging.critical("Found wrong signature in holding register")
+
+        if sensor_sequence_number > 100:
+            await update_keys(sensor_key, 2)
 
         updated_sensor.set()
 
@@ -1107,6 +1133,7 @@ async def update_departure_time(id: str, est_time: datetime, has_changed: bool) 
             send_data.set()
 
 
+# TODO create requestor for 2
 async def update_keys(secret_key: bytes, requestor: int) -> None:
     """updates the modbus keys and sends it to correct entity. requestor 0 for switch and 1 for gui"""
     new_key = Fernet.generate_key()
@@ -1393,6 +1420,7 @@ async def dh_exchange(reader: asyncio.StreamReader,
 
 async def get_switch_status(context: ModbusServerContext, switch_key: bytes, sequence_number: int) -> (int, int):
     """Queries the switch for its status"""
+    global switch_status
     func_code = 3  # function code for modbus that we want to read and write data from holding register
     slave_id = 0x00  # we broadcast the data to all the connected slaves
 
@@ -1452,6 +1480,7 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
     global departure_file_version
     global file_secret_key
     global entries_in_gui
+    global sensor_key
 
     MESSAGE_TYPE_PACKED = 1
     MESSAGE_TYPE_SINGLE_CHAR = 2
@@ -1464,7 +1493,6 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
 
     sequence_number_switch = 0
     sequence_number_gui = 0
-    sequence_number_track = 0
     rotation_switch = 0
     rotation_gui = 0
 
@@ -1515,6 +1543,8 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
     send_data.set()
     loop.create_task(send_new_entry())
     loop.create_task(arrival())
+    loop.create_task(departure())
+    loop.create_task(sensor_comm())
     loop.create_task(acquire_switch(switch_queue))
 
     # wait until client has connected
@@ -1552,7 +1582,7 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
 
     while True:
         try:
-            reader_track, writer_track = await asyncio.open_connection('localhost', 12346)
+            reader_track, writer_track = await asyncio.open_connection('localhost', 13006)
             break  # Break out of the loop if connection is successful
         except ConnectionRefusedError:
             logging.info("Connection to asyncio server failed. Retrying...")
@@ -1561,11 +1591,11 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
     logging.info("Connected to asyncio track server")
 
     derived_key = await dh_exchange(reader_track, writer_track)
-    track_key = base64.urlsafe_b64decode(derived_key)
+    sensor_key = base64.urlsafe_b64encode(derived_key)
 
     track_client = AsyncModbusTlsClient(
         "localhost",
-        port=13002,
+        port=13000,
         framer=ModbusTlsFramer,
         certfile=cert,
         keyfile=key,
@@ -2168,47 +2198,6 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
             case "g":
                 json_data = await read_from_file(1)
                 modbus_data_queue.put(['r', int(json_data[data[1]]['TrackAtLocation']), json_data[data[1]]['id']])
-            case "J":
-                data = "X " + " ".join(str(value) for value in data[1:])
-
-                client_verified = False
-
-                while not client_verified:
-                    sequence_number_track += 1
-                    temp_signature = data + str(sequence_number_track)
-                    logging.info(temp_signature)
-                    temp_signature = hmac.new(track_key, temp_signature.encode(), hashlib.sha256).hexdigest()
-                    nonce = [char for char in secrets.token_bytes(2)]
-
-                    if sequence_number_track == 100:
-                        logging.info("Updating secret key")
-                        await update_keys(switch_key, 2)
-
-                    data_to_send = ([sequence_number_switch] + [len(data)] + [ord(char) for char in data] + [
-                            32] + nonce + [32] + [ord(char) for char in temp_signature])
-
-                    logging.debug("Sending data")
-
-                    await track_client.write_registers(0x00, data_to_send, slave=1)
-                    logging.debug("Resetting flag")
-                    await track_client.write_register(datastore_size - 2, 1, slave=1)
-
-                    expected_signature = hmac.new(track_key, str(nonce).encode(), hashlib.sha256).hexdigest()
-                    await asyncio.sleep(1.5)
-
-                    hold_register = await track_client.read_holding_registers(datastore_size - 2, 1, slave=1)
-
-                    while(hold_register.registers != [0]):
-                        await asyncio.sleep(0.3)
-                        hold_register = await track_client.read_holding_registers(datastore_size - 2, 1, slave=1)
-
-                    hold_register = await track_client.read_holding_registers(0x00, 64, slave=1)
-
-                    if hold_register.registers == expected_signature:
-                        logging.debug("Client is verified")
-                        client_verified = True
-                    else:
-                        logging.critical("Found wrong signature in holding register")
             case "Z":
                 data = "X " + " ".join(str(value) for value in data[1:])
 
