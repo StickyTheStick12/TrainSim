@@ -11,10 +11,7 @@ import bcrypt
 # train tcp listening on port 15000
 
 # TODO: notify the hmi and gui of the sensor data received
-# todo. fix nonce if it is having a space. All code expects a nonce of 2 bytes
-# todo. generate some more certs and keys so everything gets a seperate cert/key
 # TODO: hmi train will receive the wrong departure time. Sometimes when it is inbetween trains
-# TODO: maybe do something about having a already set password in the json
 # TODO: fix so we have key rotation for track_sensors
 
 import bisect
@@ -1020,7 +1017,13 @@ async def sensor_comm() -> None:
                 sensor_sequence_number += 1
                 temp_signature = data + str(sensor_sequence_number)
                 temp_signature = hmac.new(sensor_key, temp_signature.encode(), hashlib.sha256).hexdigest()
-                nonce = [char for char in secrets.token_bytes(2)]
+                while True:
+                    # Generate 2 bytes
+                    nonce = [char for char in secrets.token_bytes(2)]
+
+                    # Check if any character is a space
+                    if b' ' not in nonce:
+                        break
 
                 data_to_send = ([sensor_sequence_number] + [len(data)] + [ord(char) for char in data] + [32] + nonce +
                                 [32] + [ord(char) for char in temp_signature])
@@ -1086,7 +1089,13 @@ async def sensor_comm() -> None:
                 temp_signature = data + str(sensor_sequence_number)
                 logging.info(temp_signature)
                 temp_signature = hmac.new(sensor_key, temp_signature.encode(), hashlib.sha256).hexdigest()
-                nonce = [char for char in secrets.token_bytes(2)]
+                while True:
+                    # Generate 2 bytes
+                    nonce = [char for char in secrets.token_bytes(2)]
+
+                    # Check if any character is a space
+                    if b' ' not in nonce:
+                        break
 
                 if sensor_sequence_number == 100:
                     logging.info("Updating secret key")
@@ -1497,7 +1506,13 @@ async def get_switch_status(context: ModbusServerContext, switch_key: bytes, seq
         temp_signature = data + str(sequence_number)
         logging.info(temp_signature)
         temp_signature = hmac.new(switch_key, temp_signature.encode(), hashlib.sha256).hexdigest()
-        nonce = [char for char in secrets.token_bytes(2)]
+        while True:
+            # Generate 2 bytes
+            nonce = [char for char in secrets.token_bytes(2)]
+
+            # Check if any character is a space
+            if b' ' not in nonce:
+                break
 
         if sequence_number == 100:
             logging.info("Updating secret key")
@@ -2272,7 +2287,13 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                     temp_signature = data + str(sequence_number_switch)
                     logging.info(temp_signature)
                     temp_signature = hmac.new(switch_key, temp_signature.encode(), hashlib.sha256).hexdigest()
-                    nonce = [char for char in secrets.token_bytes(2)]
+                    while True:
+                        # Generate 2 bytes
+                        nonce = [char for char in secrets.token_bytes(2)]
+
+                        # Check if any character is a space
+                        if b' ' not in nonce:
+                            break
 
                     if sequence_number_switch == 100:
                         logging.info("Updating secret key")
@@ -2312,7 +2333,13 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                     temp_signature = data + str(sequence_number_gui)
                     logging.info(temp_signature)
                     temp_signature = hmac.new(gui_key, temp_signature.encode(), hashlib.sha256).hexdigest()
-                    nonce = [char for char in secrets.token_bytes(2)]
+                    while True:
+                        # Generate 2 bytes
+                        nonce = [char for char in secrets.token_bytes(2)]
+
+                        # Check if any character is a space
+                        if b' ' not in nonce:
+                            break
 
                     if sequence_number_gui == 100:
                         logging.info("Updating secret key")
