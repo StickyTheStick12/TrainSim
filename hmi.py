@@ -11,12 +11,10 @@ import bcrypt
 # track_sensor tcp for trains listening on port 13007
 # train tcp listening on port 15000
 
-# TODO: hmi train will receive the wrong departure time. Sometimes when it is inbetween trains
-# TODO: fix so we have key rotation for track_sensors
 # TODO: fix so we have key rotation for train
-# TODO fix hmi train so it creates a train
 # TODO fix modbus packet u so it updates the time in the train too
 # TODO check packet r
+# TODO cant send file_key over tcp wtf?????
 
 import bisect
 import json
@@ -127,7 +125,6 @@ sensor_key = b""
 sensor_requests = asyncio.Queue()
 
 train_queue = asyncio.Queue()
-train_mutex = asyncio.Lock()
 sequence_number_train = 0
 train_key = b""
 
@@ -403,59 +400,59 @@ async def communication_with_trains() -> None:
 
     while True:
         data = await train_queue.get()
-        async with train_mutex:
-            data = " ".join(str(value) for value in data)
 
-            client_verified = False
+        data = " ".join(str(value) for value in data)
 
-            while not client_verified:
-                sequence_number_train += 1
-                temp_signature = data + str(sequence_number_train)
-                logging.info(temp_signature)
-                temp_signature = hmac.new(train_key, temp_signature.encode(), hashlib.sha256).hexdigest()
-                while True:
-                    # Generate 2 bytes
-                    nonce = [char for char in secrets.token_bytes(2)]
+        client_verified = False
 
-                    # Check if any character is a space
-                    if b' ' not in nonce:
-                        break
+        while not client_verified:
+            sequence_number_train += 1
+            temp_signature = data + str(sequence_number_train)
+            logging.info(temp_signature)
+            temp_signature = hmac.new(train_key, temp_signature.encode(), hashlib.sha256).hexdigest()
+            while True:
+                # Generate 2 bytes
+                nonce = [char for char in secrets.token_bytes(2)]
 
-                if sequence_number_train == 100:
-                    logging.info("Updating secret key")
-                    # await update_keys(gui_key, 1)
+                # Check if any character is a space
+                if b' ' not in nonce:
+                    break
 
-                data_to_send = ([sequence_number_train] + [len(data)] + [ord(char) for char in data] + [32] + nonce +
-                                [32] + [ord(char) for char in temp_signature])
+            if sequence_number_train == 100:
+                logging.info("Updating secret key")
+                # await update_keys(gui_key, 1)
 
-                logging.info(data_to_send)
+            data_to_send = ([sequence_number_train] + [len(data)] + [ord(char) for char in data] + [32] + nonce +
+                            [32] + [ord(char) for char in temp_signature])
 
-                logging.debug("Sending data")
-                packed_data = struct.pack('!I{}I'.format(len(data_to_send)), len(data_to_send), *data_to_send)
-                header_packed_data = struct.pack('!II', MESSAGE_TYPE_PACKED, len(packed_data))
-                combined_data_packed_data = header_packed_data + packed_data
-                writer_train.write(combined_data_packed_data)
-                await writer_train.drain()
+            logging.info(data_to_send)
 
-                expected_signature = [ord(char) for char in
-                                      hmac.new(train_key, str(nonce).encode(), hashlib.sha256).hexdigest()]
+            logging.debug("Sending data")
+            packed_data = struct.pack('!I{}I'.format(len(data_to_send)), len(data_to_send), *data_to_send)
+            header_packed_data = struct.pack('!II', MESSAGE_TYPE_PACKED, len(packed_data))
+            combined_data_packed_data = header_packed_data + packed_data
+            writer_train.write(combined_data_packed_data)
+            await writer_train.drain()
 
-                logging.debug(f"nonce {str(nonce)}")
-                logging.debug(f"Expecting: {expected_signature}")
+            expected_signature = [ord(char) for char in
+                                  hmac.new(train_key, str(nonce).encode(), hashlib.sha256).hexdigest()]
 
-                recv_data.set()
+            logging.debug(f"nonce {str(nonce)}")
+            logging.debug(f"Expecting: {expected_signature}")
 
-                packed_data = await data_queue.get()
+            recv_data.set()
 
-                received_signature = list(struct.unpack('!64I', packed_data))
+            packed_data = await data_queue.get()
 
-                logging.info(received_signature)
+            received_signature = list(struct.unpack('!64I', packed_data))
 
-                if received_signature == expected_signature:
-                    logging.debug("Client is verified")
-                    client_verified = True
-                else:
-                    logging.critical("Found wrong signature in holding register")
+            logging.info(received_signature)
+
+            if received_signature == expected_signature:
+                logging.debug("Client is verified")
+                client_verified = True
+            else:
+                logging.critical("Found wrong signature in holding register")
 
 
 async def read_comm_with_trains(reader: asyncio.StreamReader, writer: asyncio.StreamWriter, data_queue: asyncio.Queue,
@@ -971,6 +968,7 @@ async def hmi_helper() -> None:
         await modbus_data_queue.put(data)
 
 
+# TODO
 async def update_departure_time(id: str, est_time: datetime, has_changed: bool) -> None:
     """Updates the departure time based on the arrival time"""
     global entries_in_gui
@@ -1398,7 +1396,6 @@ def choose_characters(secret: bytes) -> str:
     return "".join(result)
 
 
-# TODO: add key rotation
 async def sensor_comm() -> None:
     """Handles communication with the track sensors"""
     sensor_sequence_number = 0
@@ -1476,6 +1473,12 @@ async def sensor_comm() -> None:
                 logging.error("Error reading holding register")
 
         await asyncio.sleep(10)
+
+
+async def rotation_comm(reader: asyncio.StreamReader, secret_key_sensors: bytes) -> None:
+    while True:
+        await reader.read(1024)
+        await update_keys(secret_key_sensors, 2)
 
 
 async def handle_simulation_communication(context: ModbusServerContext) -> None:
@@ -1613,6 +1616,8 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
 
     derived_key = await dh_exchange(reader_track, writer_track)
     sensor_key = base64.urlsafe_b64encode(derived_key)
+
+    loop.create_task(rotation_comm(reader_track, sensor_key))
 
     track_client = AsyncModbusTlsClient(
         "localhost",
@@ -1911,7 +1916,6 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
 
                 idx = bisect.bisect_left(merged_existing_times, estimated_time)
 
-                arrival_idx = 0
                 is_found = False
 
                 # case 1: can be scheduled before all the other trains
@@ -1970,31 +1974,12 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                                   'TrainOwner': "hmi",
                                   'id': str(available_id)}
 
-                    arrival_idx = len(arrival_data)
                     arrival_data.append(train_data)
 
                 await write_to_file(arrival_data, 0)
 
-                # Handle switch-related signals based on the scheduled arrival index
-                if arrival_idx == 0:
-                    if serving_arrival.is_set():
-                        give_up_switch.set()
-                    elif arrival_switch_request.is_set():
-                        try:
-                            temp = switch_queue.get_nowait()
-
-                            if temp[0] != 0:
-                                await switch_queue.put(temp)
-
-                            switch_queue.get_nowait()
-                        except asyncio.QueueEmpty:
-                            pass
-
-                    wake_arrival.set()
-
                 is_found = False
                 best_departure_time = timedelta(minutes=0)
-                departure_index = 0
                 departure_estimated_time = estimated_time + timedelta(minutes=5)
                 departure_idx = bisect.bisect_right(merged_existing_times, departure_estimated_time)
 
@@ -2106,26 +2091,8 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                 await write_to_file(departure_data, 1)
                 await departure_to_data()
 
-                if departure_index == 0:
-                    if serving_departure.is_set():
-                        give_up_switch.set()
-                    elif departure_switch_request.is_set():
-                        try:
-                            temp = switch_queue.get_nowait()
-
-                            if temp[0] != 0:
-                                await switch_queue.put(temp)
-
-                            switch_queue.get_nowait()
-                        except asyncio.QueueEmpty:
-                            pass
-
-                    wake_departure.set()
-
-                    logging.info(wake_departure.is_set())
-
                 for i in range(3, -1, -1):
-                    modbus_data_queue.put(["B", str(i)])
+                    await modbus_data_queue.put(["B", str(i)])
                     entries_in_gui -= 1
                 send_data.set()
 
@@ -2136,10 +2103,10 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                 departure_file_version = 0
                 arrival_file_version = 0
 
-                rotation = [rotation_switch, rotation_gui]
-                writer = [writer_switch, writer_gui]
-                reader = [reader_switch, reader_gui]
-                sequence_number = [sequence_number_switch, sequence_number_gui]
+                rotation = [rotation_switch, rotation_gui, rotation_track]
+                writer = [writer_switch, writer_gui, writer_track]
+                reader = [reader_switch, reader_gui, reader_track]
+                sequence_number = [sequence_number_switch, sequence_number_gui, sequence_number_track]
 
                 if rotation[data[1]] == 3:
                     header_char = struct.pack('!II', MESSAGE_TYPE_SINGLE_CHAR, 1)
