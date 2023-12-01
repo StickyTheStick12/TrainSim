@@ -20,6 +20,10 @@ sequence_number = 0
 MESSAGE_TYPE_PACKED = 1
 mutex = asyncio.Lock()
 
+# TODO. connect to track sensors and send data
+# TODO fix so we can send data to the simulation
+# TODO fix so we can receive data from the simulation
+
 try:
     os.remove(os.path.join(os.getcwd(), "logs", "Train.log"))
 except FileNotFoundError:
