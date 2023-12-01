@@ -178,6 +178,15 @@ The simulation employs various communication protocols to facilitate interaction
 **Description of the Attack Scenario and Steps to Reproduce the Attack**
    - Detailed information on the attack scenario, potential vulnerabilities, and steps to reproduce the attack.
 
+
+## Security Considerations
+
+### Key Rotation for Authentication
+
+To enhance the security of the simulation, a key rotation mechanism has been implemented for authentication purposes. Key rotation involves regularly updating the cryptographic keys used in the authentication process. The primary reason for this is that we are using a challenge-response mechanism where the receiver acknowledges the package by calculating an HMAC for a challenge nonce. Due to the limited nonce space (2 bytes), there is a significant chance that a nonce will repeat, which an attacker may exploit.
+
+### Implementation Details
+
 - **Frequency:** The current key rotation is set quite low on 100 sent packages.
 - **Procedure:** We have two different types of key rotations. We have a soft key rotation where we assume that the current key is safe and just generate a new 32 bytes key and encrypt this new key with the old key and send it over TCP. For the other key rotation which also is set quite low, after 3 rotations like this or 300 packages, we will generate a new key with diffie hellman in group 14. For the generation of this key we are incorporating a challenge as part of the keying material and also serves as a authentication of the other client. A part of the challenge will be used as a seed to a random function that then will pick 32 random characters to add to our keying material to make it harder for a mitm attack to occur.
 - **Impact:** While we are updating the keys we don't allow any data to be transmitted because the authentication will fail if we use the old key when sending and the receiver uses the new key. The impact on the transmission of the data differs between the different programs. Some of the communications channels will abort the current transmission and wait until the new key is set before continuing if they receive a sequence number of 100, and thus starts over with a sequence number of 0. Some other programs won't abort the transmission, instead they will allow the package to send so the sequence number can become bigger than 100 if the receiver fails give the correct authentication. 
