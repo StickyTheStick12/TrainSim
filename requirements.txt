@@ -1,4 +1,4 @@
-aiohttp == 3.8.6
+aiohttp == 3.9.0
 bcrypt == 3.2.0
 cryptography == 41.0.5
 customtkinter == 5.2.0
