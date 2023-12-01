@@ -98,3 +98,79 @@ Set the generated hash in the password field.
    
 These three subpages are accessible through the navigation bar.
 
+## Back-end (SCADA-like) Server and PLCs Description
+
+The backend server plays a central role in the simulation, handling various tasks:
+
+### Backend Server
+- Queries Trafikverket for train data:
+  - Arrivals every 10 minutes.
+  - Departures every 40 minutes.
+- Saves data into `arrival.json` and `departure.json`, protected with an HMAC for data integrity.
+- Manages data received from the web HMI, including logic for creating, deleting, or modifying train, track and switch information.
+- Communicates with the GUI application to provide real-time information.
+
+#### SCADA-like Simulation
+- Handles switch requests:
+  - Immediate response for HMI requests.
+  - 3-minute cooldown for train requests, ensuring priority for the train requesting the switch.
+- Manages information from track sensors to determine track occupancy.
+
+### Trains Script
+- Operates independently and receives necessary data from the simulation.
+- Sends switch requests to SCADA server when departing or arriving.
+- Updates track sensors when arriving or departing.
+
+### Track Sensors
+- Not PLCs themselves, but their data is forwarded to PLCs.
+- Each track has its own PLC and Modbus register.
+- Notifies the SCADA server of changes in track occupancy when an update occurs.
+
+### Switch
+- Receives updates from the SCADA server to change to specific tracks.
+- Includes functionality to query its status when a train arrives.
+- Adjusts the train route based on the actual switch status if it differs from expectations.
+
+
+## Communication Protocols (Operator-HMI-SCADA-PLCs)
+
+The simulation employs various communication protocols to facilitate interaction between different components:
+
+### Client and Flask Web App
+- **Protocol:** HTTPS
+- **Description:** Ensures secure communication between the client and the Flask web application.
+
+### Flask and Simulation/SCADA Server
+- **Protocol:** Inter-Process Communication (IPC)
+- **Description:** Direct communication method between Flask and the simulation/SCADA server.
+
+### SCADA Server and GUI
+- **Protocol:** TCP
+- **Authentication:** HMAC with a secret key generated in Diffie-Hellman Group 14
+- **Description:** Authenticated TCP communication for real-time information exchange between the SCADA server and the GUI application.
+
+### SCADA Server and Trains
+- **Protocol:** TCP
+- **Authentication:** HMAC with a secret key generated in Diffie-Hellman Group 14
+- **Description:** Secure TCP communication for interaction between the SCADA server and trains.
+
+### Track Sensors
+- **Protocol:** TCP (Two Ports)
+  - **Port 1:**
+    - **Used by:** Trains to send status.
+    - **Authentication:** HMAC with a secret key generated in Diffie-Hellman Group 14.
+  - **Port 2:**
+    - **Used by:** SCADA server to generate a secret key in Diffie-Hellman Group 14 for Modbus communication.
+ - **Protocol:** Modbus
+ - **Authentication:** HMAC with prior secret.
+- **Description:** Modbus communication for sending data to the SCADA server.
+
+### Switch
+- **Protocol:** TCP
+- **Description:** TCP communication for generating a secret in Diffie-Hellman Group 14.
+-  **Protocol:** Modbus
+ - **Authentication:** HMAC with prior secret.
+- **Description:** Modbus communication for sending and receiving data from the SCADA server.
+
+
+
