@@ -5,6 +5,8 @@ import os
 import hmac
 import base64
 import random
+import struct
+import secrets
 
 from pymodbus import __version__ as pymodbus_version
 from pymodbus.datastore import (
@@ -30,19 +32,24 @@ modbus_port = 13000
 cert = os.path.join(os.getcwd(), "TLS", "track_cert.pem")
 key = os.path.join(os.getcwd(), "TLS", "track_key.pem")
 
-lst_of_statuses = [0]*6
+track_status = [0]*6
+track_updates = [0]*6
 
-sequence_number = 0
+sequence_number_modbus = 0
+sequence_number_train = 0
 
-secret_key = b""
+secret_key_modbus = b""
+secret_key_trains = b""
 
+# TODO reverse modbus so we actively sends data
 
-async def handle_server() -> None:
-    async def receive_key(reader: asyncio.StreamReader,
+async def handle_train_server() -> None:
+    async def receive_data(reader: asyncio.StreamReader,
                           writer: asyncio.StreamWriter) -> None:
 
-        global secret_key
-        global highest_data_id
+        global secret_key_trains
+        global sequence_number_train
+        MESSAGE_TYPE_PACKED = 1
 
         p = 0xFFFFFFFFFFFFFFFFC90FDAA22168C234C4C6628B80DC1CD129024E088A67CC74020BBEA63B139B22514A08798E3404DDEF9519B3CD3A431B302B0A6DF25F14374FE1356D6D51C245E485B576625E7EC6F44C42E9A637ED6B0BFF5CB6F406B7EDEE386BFB5A899FA5AE9F24117C4B1FE649286651ECE45B3DC2007CB8A163BF0598DA48361C55D39A69163FA8FD24CF5F83655D23DCA3AD961C62F356208552BB9ED529077096966D670C354E4ABC9804F1746C08CA18217C32905E462E36CE3BE39E772C180E86039B2783A2EC07A28FB5C55DF06F4C52C9DE2BCBF6955817183995497CEA956AE515D2261898FA051015728E5A8AACAA68FFFFFFFFFFFFFFFF
         g = 2
@@ -73,7 +80,162 @@ async def handle_server() -> None:
             info=b'handshake data',
         ).derive(shared_secret)
 
-        secret_key = base64.urlsafe_b64encode(derived_key)
+        secret_key_trains = base64.urlsafe_b64encode(derived_key)
+
+        while True:
+            data = await reader.read(1024)
+            logging.info("Received data")
+
+            received_header = data[:8]
+            message_type, data_length = struct.unpack('!II', received_header)
+
+            if message_type == MESSAGE_TYPE_PACKED:
+                logging.info("Received data")
+                # unpacked_length = struct.unpack('!I', data[4:8])[0]
+                data = list(struct.unpack('!{}I'.format(data_length // 4), data[8:]))
+                data = data[1:]
+
+                data_id = data[0]
+                amount_to_read = data[1]
+
+                received_data = "".join(
+                    chr(char) for char in data[2:2 + amount_to_read + 1
+                                                 + 2 + 1 + 64])
+
+                logging.info(received_data)
+                nonce = received_data[1 + amount_to_read:1 + amount_to_read + 2]
+                signature = received_data[1 + amount_to_read + 3:]
+
+                data = received_data[:amount_to_read].split(" ")
+
+                if not data_id > sequence_number_train:
+                    continue
+
+                sequence_number_train = data_id
+
+                # verify signature
+                calc_signature = " ".join(str(value) for value in data) + str(data_id)
+                logging.debug(f"calculating signature for this {calc_signature}")
+                calc_signature = hmac.new(secret_key_trains, calc_signature.encode(), hashlib.sha256).hexdigest()
+
+                if signature == calc_signature:
+                    # calculate new signature for nonce
+                    nonce = [ord(char) for char in nonce]
+
+                    calc_signature = hmac.new(secret_key_trains, str(nonce).encode(), hashlib.sha256).hexdigest()
+
+                    calc_signature = [ord(char) for char in calc_signature]
+                    logging.info(calc_signature)
+
+                    packed_data = struct.pack('!64I', *calc_signature)
+
+                    writer.write(packed_data)
+                    await writer.drain()
+
+                    logging.info("Verified signature on data. Updating status")
+
+                    track_status[int(data[1]) - 1] = int(data[2])
+                    track_updates[int(data[1]) - 1] = 1
+                else:
+                    logging.critical("Found wrong signature in data")
+            else:
+                received_single_char = data[8:8 + data_length]
+
+                if received_single_char.decode() == "D":
+                    logging.info("Received diffie hellman update wish")
+                    p = 0xFFFFFFFFFFFFFFFFC90FDAA22168C234C4C6628B80DC1CD129024E088A67CC74020BBEA63B139B22514A08798E3404DDEF9519B3CD3A431B302B0A6DF25F14374FE1356D6D51C245E485B576625E7EC6F44C42E9A637ED6B0BFF5CB6F406B7EDEE386BFB5A899FA5AE9F24117C4B1FE649286651ECE45B3DC2007CB8A163BF0598DA48361C55D39A69163FA8FD24CF5F83655D23DCA3AD961C62F356208552BB9ED529077096966D670C354E4ABC9804F1746C08CA18217C32905E462E36CE3BE39E772C180E86039B2783A2EC07A28FB5C55DF06F4C52C9DE2BCBF6955817183995497CEA956AE515D2261898FA051015728E5A8AACAA68FFFFFFFFFFFFFFFF
+                    g = 2
+
+                    params_numbers = dh.DHParameterNumbers(p, g)
+                    parameters = params_numbers.parameters(default_backend())
+
+                    private_key = parameters.generate_private_key()
+                    public_key = private_key.public_key()
+
+                    public_key_bytes = public_key.public_bytes(
+                        encoding=serialization.Encoding.PEM,
+                        format=serialization.PublicFormat.SubjectPublicKeyInfo
+                    )
+
+                    server_public_key = await reader.read(2048)
+                    writer.write(public_key_bytes)
+                    await writer.drain()
+
+                    test = await reader.read(1024)
+
+                    secret = await choose_characters(test)
+
+                    server_public_key = serialization.load_pem_public_key(server_public_key,
+                                                                          backend=default_backend())
+
+                    shared_secret = private_key.exchange(server_public_key)
+
+                    shared_secret += secret.encode()
+
+                    derived_key = HKDF(
+                        algorithm=hashes.SHA256(),
+                        length=32,
+                        salt=None,
+                        info=b'handshake data',
+                    ).derive(shared_secret)
+
+                    secret_key_trains = base64.urlsafe_b64encode(derived_key)
+
+                    signature = hmac.new(secret_key_trains, test, hashlib.sha256).hexdigest()
+
+                    writer.write(signature.encode())
+                    await writer.drain()
+                else:
+                    logging.info("Received wish for ordinary key rotation")
+                    data = await reader.read(1024)
+                    cipher = Fernet(secret_key_trains)
+                    secret_key_trains = cipher.decrypt(data)
+
+                logging.info("Updated secret key")
+                sequence_number_train = 0
+
+    server = await asyncio.start_server(receive_data, "localhost", 13007)
+    async with server:
+        await server.serve_forever()
+
+
+async def handle_server() -> None:
+    async def receive_key(reader: asyncio.StreamReader,
+                          writer: asyncio.StreamWriter) -> None:
+
+        global secret_key_modbus
+        global sequence_number_modbus
+
+        p = 0xFFFFFFFFFFFFFFFFC90FDAA22168C234C4C6628B80DC1CD129024E088A67CC74020BBEA63B139B22514A08798E3404DDEF9519B3CD3A431B302B0A6DF25F14374FE1356D6D51C245E485B576625E7EC6F44C42E9A637ED6B0BFF5CB6F406B7EDEE386BFB5A899FA5AE9F24117C4B1FE649286651ECE45B3DC2007CB8A163BF0598DA48361C55D39A69163FA8FD24CF5F83655D23DCA3AD961C62F356208552BB9ED529077096966D670C354E4ABC9804F1746C08CA18217C32905E462E36CE3BE39E772C180E86039B2783A2EC07A28FB5C55DF06F4C52C9DE2BCBF6955817183995497CEA956AE515D2261898FA051015728E5A8AACAA68FFFFFFFFFFFFFFFF
+        g = 2
+
+        params_numbers = dh.DHParameterNumbers(p, g)
+        parameters = params_numbers.parameters(default_backend())
+
+        private_key = parameters.generate_private_key()
+        public_key = private_key.public_key()
+
+        public_key_bytes = public_key.public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo
+        )
+
+        server_public_key = await reader.read(2048)
+        writer.write(public_key_bytes)
+        await writer.drain()
+
+        server_public_key = serialization.load_pem_public_key(server_public_key, backend=default_backend())
+
+        shared_secret = private_key.exchange(server_public_key)
+
+        derived_key = HKDF(
+            algorithm=hashes.SHA256(),
+            length=32,
+            salt=None,
+            info=b'handshake data',
+        ).derive(shared_secret)
+
+        secret_key_modbus = base64.urlsafe_b64encode(derived_key)
 
         while True:
             data = await reader.read(1024)
@@ -114,17 +276,17 @@ async def handle_server() -> None:
                     info=b'handshake data',
                 ).derive(shared_secret)
 
-                secret_key = base64.urlsafe_b64encode(derived_key)
+                secret_key_modbus = base64.urlsafe_b64encode(derived_key)
 
-                signature = hmac.new(secret_key, test, hashlib.sha256).hexdigest()
+                signature = hmac.new(secret_key_modbus, test, hashlib.sha256).hexdigest()
                 writer.write(signature.encode())
                 await writer.drain()
             else:
-                cipher = Fernet(secret_key)
-                secret_key = cipher.decrypt(data)
+                cipher = Fernet(secret_key_modbus)
+                secret_key_modbus = cipher.decrypt(data)
 
             logging.info("Updated secret key")
-            highest_data_id = 0
+            sequence_number_modbus = 0
 
     server = await asyncio.start_server(receive_key, "localhost", 13006)
     async with server:
@@ -170,7 +332,19 @@ async def modbus_server_thread(context: ModbusServerContext, port) -> None:
     )
 
 
-async def answer_client(idx: int, context: ModbusServerContext) -> None:
+def setup_server() -> ModbusServerContext:
+    """Generates our holding register for the server"""
+    # global context
+    datablock = ModbusSequentialDataBlock(0x00, [0] * datastore_size)
+    context = ModbusSlaveContext(
+        di=datablock, co=datablock, hr=datablock, ir=datablock)
+    context = ModbusServerContext(slaves=context, single=True)
+
+    logging.info("Created datastore")
+    return context
+
+
+async def update_track_simulation(idx: int, context: ModbusServerContext) -> None:
     global sequence_number
     global lst_of_statuses
 
@@ -227,26 +401,13 @@ async def answer_client(idx: int, context: ModbusServerContext) -> None:
 async def run_modbus(lst_of_contexts: list) -> None:
     while True:
         for i in range(6):
-            if lst_of_contexts[i][0x00].getValues(3, datastore_size - 2, 1) == [0]:
-                await answer_client(i, lst_of_contexts[i])
+            if track_updates[i] != 0:
+                await update_track_simulation(i, lst_of_contexts[i])
 
-            await asyncio.sleep(0.3)
-
-
-def setup_server() -> ModbusServerContext:
-    """Generates our holding register for the server"""
-    # global context
-    datablock = ModbusSequentialDataBlock(0x00, [0] * datastore_size)
-    context = ModbusSlaveContext(
-        di=datablock, co=datablock, hr=datablock, ir=datablock)
-    context = ModbusServerContext(slaves=context, single=True)
-
-    logging.info("Created datastore")
-    return context
+            await asyncio.sleep(5)
 
 
-def modbus_helper() -> None:
-    """Sets up server and send data task"""
+if __name__ == "__main__":
     loop = asyncio.new_event_loop()
 
     context1 = setup_server()
@@ -263,9 +424,8 @@ def modbus_helper() -> None:
     loop.create_task(modbus_server_thread(context5, 13004))
     loop.create_task(modbus_server_thread(context6, 13005))
     loop.create_task(handle_server())
+    loop.create_task(handle_train_server())
 
     lst_of_contexts = [context1, context2, context3, context4, context5, context6]
 
     loop.run_until_complete(run_modbus(lst_of_contexts))
-
-modbus_helper()
