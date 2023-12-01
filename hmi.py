@@ -11,12 +11,12 @@ import bcrypt
 # track_sensor tcp for trains listening on port 13007
 # train tcp listening on port 15000
 
-# TODO: notify the hmi and gui of the sensor data received
 # TODO: hmi train will receive the wrong departure time. Sometimes when it is inbetween trains
 # TODO: fix so we have key rotation for track_sensors
-# TODO. replace the multiprocessing queue with a asyncio queue
-# TODO. hmi track status should be put in track_status and not reservations
-# TODO: cant remove arriving train
+# TODO: fix so we have key rotation for train
+# TODO fix hmi train so it creates a train
+# TODO fix modbus packet u so it updates the time in the train too
+# TODO check packet r
 
 import bisect
 import json
@@ -92,7 +92,6 @@ give_up_switch = asyncio.Event()
 track_semaphore = asyncio.Semaphore(value=6)
 track_status = [0] * 6  # this is the track_status that the trains use when deciding on a track.
 track_reservations = [0] * 6
-removed_train_ids = []
 
 created_trains = []
 arrived_trains = []
@@ -1768,42 +1767,42 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
 
                 json_data = await read_from_file(0)
 
-                has_arrived = True
+                has_arrived = False
 
                 for idx, train in enumerate(json_data):
                     if 'id' in train and train['id'] == data[2]:
+                        if data[2] in arrived_trains:
+                            has_arrived = True
+                        else:
+                            logging.info("Train hasn't arrived yet")
+                            track_reservations[int(train["TrackAtLocation"]) - 1] = 0
 
-                        for i in range(len(arrival_data)):
-                            if data[2] == arrived_trains[i]:
-                                has_arrived = False
-                                logging.info("Train hasn't arrived yet")
-                                del arrived_trains[i]
-                                
-                                # TODO: check if train has reserved a track if so remove
-                                
-                                break
-                        
-                        for i in range(len(created_trains)):
-                            if data[2] == created_trains[i]:
-                                msg = [
-                                    "R",
-                                    train['id']
-                                ]
-                                await train_queue.put(msg)
-                                del created_trains[i]
-                                break
+                            for j in range(len(created_trains)):
+                                if data[2] == created_trains[j]:
+                                    msg = [
+                                        "R",
+                                        train['id']
+                                    ]
+                                    await train_queue.put(msg)
+                                    del created_trains[j]
+                                    break
 
-                        if not has_arrived and switch_queue.qsize() > 0:
-                            for i in range(switch_queue.qsize()):
-                                t = await switch_queue.get()
+                            if switch_queue.qsize() > 0:
+                                for i in range(switch_queue.qsize()):
+                                    t = await switch_queue.get()
 
-                                if t[3] != data[2]:
-                                    await switch_queue.put(t)
+                                    if t[3] != data[2]:
+                                        await switch_queue.put(t)
+
+                        if idx == 0:
+                            wake_arrival.set()
 
                         train['IsRemoved'] = True
                         json_data.append(json_data.pop(idx))
                         await write_to_file(json_data, 0)
                         break
+                    else:
+                        has_arrived = True
 
                 json_data = await read_from_file(1)
 
@@ -1814,20 +1813,19 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                                                                                             sequence_number_switch)
                             if switch_status != data[1]:
                                 logging.error("The train derailed when it tried to leave the station")
-                            
+
+                            for i in range(len(created_trains)):
+                                if data[2] == created_trains[i]:
+                                    msg = [
+                                        "R",
+                                        train['id']
+                                    ]
+                                    await train_queue.put(msg)
+                                    del created_trains[i]
+                                    break
                             await modbus_data_queue.put(["R", train['TrackAtLocation'], str(idx)])
-
-                        
-
-
-
-
-                            # clear track
-                            track_status_sim[data[1] - 1] = 0
-                            logging.info("Cleared track")
-                            track_semaphore.release()
                         else:
-                            modbus_data_queue.put(["B", str(idx)])
+                            await modbus_data_queue.put(["B", str(idx)])
 
                         train['IsRemoved'] = True
                         json_data.append(json_data.pop(idx))
@@ -1836,43 +1834,36 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                         break
             case "t":
                 logging.info("Received track status update")
-                # we will send the set status to the train instead and let them handle it
                 if data[2] == "O":
-                    track_status_sim[data[1] - 1] = 1
+                    track_status[data[1] - 1] = 1
                     logging.info("Occupied track")
-
-                    # modbus_data_queue.put(["J"] + data[1:])
 
                     # Just for the hmi. If all the tracks are occupied don't lock this function
                     if not track_semaphore.locked() and len(data) == 4:
                         await track_semaphore.acquire()
 
-                    modbus_data_queue.put(["T", data[1], "O"])
+                    await modbus_data_queue.put(["T", data[1], "O"])
                 else:
-                    # modbus_data_queue.put(["J"] + data[1:])
-                    track_status_sim[data[1] - 1] = 0
-                    await asyncio.sleep(3)
+                    track_status[data[1] - 1] = 0
 
                     logging.info("Cleared track")
                     track_semaphore.release()
-                    modbus_data_queue.put(["T", data[1], "A"])
+                    await modbus_data_queue.put(["T", data[1], "A"])
 
                 await departure_to_data()
             case "u":
-                logging.info("Received wish to update track for departure from simulation")
+                logging.info("Received wish to update train data for departure from simulation")
 
                 json_data = await read_from_file(1)
 
                 for i in range(len(json_data)):
                     if json_data[i]["id"] == data[1]:
                         json_data[i]["TrackAtLocation"] = data[2]
-                        modbus_data_queue.put(
+                        await modbus_data_queue.put(
                             ["U", str(i), json_data[i]['EstimatedTime'],
                              json_data[i]["TrackAtLocation"]])
                         logging.info("updated track in departure file")
                         break
-
-                # write new track to train.py
 
                 await write_to_file(json_data, 1)
             case "h":
@@ -2235,7 +2226,7 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                 logging.info("updated HMAC in files")
             case "g":
                 json_data = await read_from_file(1)
-                modbus_data_queue.put(['r', int(json_data[data[1]]['TrackAtLocation']), json_data[data[1]]['id']])
+                await modbus_data_queue.put(['r', int(json_data[data[1]]['TrackAtLocation']), json_data[data[1]]['id']])
             case "Z":
                 data = "X " + " ".join(str(value) for value in data[1:])
 
