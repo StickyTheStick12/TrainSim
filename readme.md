@@ -49,6 +49,11 @@ Once the dependencies are installed, you can use the provided Makefile for conve
 
 Choose the option that best fits your environment and preferences. 
 
+To stop the program, simply write the following command:
+
+```bash
+make stop
+```
 
 ## Architecture picture
 
