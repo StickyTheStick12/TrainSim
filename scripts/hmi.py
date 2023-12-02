@@ -389,9 +389,15 @@ async def communication_with_trains() -> None:
     recv_data = asyncio.Event()
 
     loop = asyncio.get_event_loop()
-
-    reader_train, writer_train = asyncio.open_connection("localhost", 15000)
-
+    
+    while True:
+        try:
+            reader_train, writer_train = await asyncio.open_connection("localhost", 15000)
+            break  # Break out of the loop if connection is successful
+        except ConnectionRefusedError:
+            logging.info("Connection to asyncio server failed. Retrying...")
+            await asyncio.sleep(1)  # Wait for a while before retrying
+    
     train_key = await dh_exchange(reader_train, writer_train)
 
     loop.create_task(read_comm_with_trains(reader_train, writer_train, data_queue, recv_data))
