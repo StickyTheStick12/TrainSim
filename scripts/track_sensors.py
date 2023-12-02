@@ -435,6 +435,7 @@ if __name__ == "__main__":
     context5 = setup_server()
     context6 = setup_server()
 
+    loop.create_task(handle_train_server())
     loop.create_task(modbus_server_thread(context1, 13000))
     loop.create_task(modbus_server_thread(context2, 13001))
     loop.create_task(modbus_server_thread(context3, 13002))
@@ -442,7 +443,6 @@ if __name__ == "__main__":
     loop.create_task(modbus_server_thread(context5, 13004))
     loop.create_task(modbus_server_thread(context6, 13005))
     loop.create_task(handle_server())
-    loop.create_task(handle_train_server())
 
     lst_of_contexts = [context1, context2, context3, context4, context5, context6]
 
