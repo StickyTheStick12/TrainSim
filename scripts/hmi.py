@@ -12,7 +12,6 @@ import bcrypt
 # train tcp listening on port 15000
 
 # TODO: fix so we have key rotation for train
-# TODO: timetable updates even if the hmi train isn't in the timetable
 
 import bisect
 import json
@@ -2011,6 +2010,8 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                 departure_estimated_time = estimated_time + timedelta(minutes=5)
                 departure_idx = bisect.bisect_right(merged_existing_times, departure_estimated_time)
 
+                departure_index = 0
+                
                 # case 1: can be scheduled before all the other trains
                 if departure_idx == 0:
                     start_interval = (merged_existing_times[0] - timedelta(minutes=2)) - (
@@ -2121,11 +2122,12 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
 
                 if arrival_idx == 0:
                     wake_arrival.set()
-
-                for i in range(3, -1, -1):
-                    await modbus_data_queue.put(["B", str(i)])
-                    entries_in_gui -= 1
-                send_data.set()
+                
+                if departure_index < 4:
+                    for i in range(3, -1, -1):
+                        await modbus_data_queue.put(["B", str(i)])
+                        entries_in_gui -= 1
+                    send_data.set()
 
                 await departure_to_data()
             case "K":
