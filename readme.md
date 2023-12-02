@@ -1,3 +1,4 @@
+
 ## Introduction - Project Structure
 
 The project is organized into two main directories: `attack` and `simulation`. The `simulation` directory is further divided into several subdirectories:
@@ -122,6 +123,7 @@ The backend server plays a central role in the simulation, handling various task
 - Manages information from track sensors to determine track occupancy.
 
 ### Trains Script
+- Not a PLC, but part of the simulation part of the project
 - Operates independently and receives necessary data from the simulation.
 - Sends switch requests to SCADA server when departing or arriving.
 - Updates track sensors when arriving or departing.
@@ -134,7 +136,7 @@ The backend server plays a central role in the simulation, handling various task
 ### Switch
 - Receives updates from the SCADA server to change to specific tracks.
 - Includes functionality to query its status when a train arrives.
-- Adjusts the train route based on the actual switch status if it differs from expectations.
+- The simulation will change which track the train is going to if the recieved switch status differs from the expected.
 
 
 ## Communication Protocols (Operator-HMI-SCADA-PLCs)
@@ -142,7 +144,7 @@ The backend server plays a central role in the simulation, handling various task
 The simulation employs various communication protocols to facilitate interaction between different components:
 
 ### Client and Flask Web App
-- **Protocol:** HTTPS
+- **Protocol:** HTTPS (port 5001)
 - **Description:** Ensures secure communication between the client and the Flask web application.
 
 ### Flask and Simulation/SCADA Server
@@ -150,37 +152,37 @@ The simulation employs various communication protocols to facilitate interaction
 - **Description:** Direct communication method between Flask and the simulation/SCADA server.
 
 ### SCADA Server and GUI
-- **Protocol:** TCP
+- **Protocol:** TCP (port 12346)
 - **Authentication:** HMAC with a secret key generated in Diffie-Hellman Group 14
 - **Description:** Authenticated TCP communication for real-time information exchange between the SCADA server and the GUI application.
 
 ### SCADA Server and Trains
-- **Protocol:** TCP
+- **Protocol:** TCP (port 15000)
 - **Authentication:** HMAC with a secret key generated in Diffie-Hellman Group 14
 - **Description:** Secure TCP communication for interaction between the SCADA server and trains.
 
 ### Track Sensors
 - **Protocol:** TCP (Two Ports)
-  - **Port 1:**
+  - **Port 1:** (port 13007)
     - **Used by:** Trains to send status.
     - **Authentication:** HMAC with a secret key generated in Diffie-Hellman Group 14.
-  - **Port 2:**
+  - **Port 2:** (port 13006)
     - **Used by:** SCADA server to generate a secret key in Diffie-Hellman Group 14 for Modbus communication.
- - **Protocol:** Modbus
+ - **Protocol:** Modbus (port 13000 - 13005)
  - **Authentication:** HMAC with prior secret.
 - **Description:** Modbus communication for sending data to the SCADA server.
 
 ### Switch
-- **Protocol:** TCP
+- **Protocol:** TCP (port 12344)
 - **Description:** TCP communication for generating a secret in Diffie-Hellman Group 14.
--  **Protocol:** Modbus
+-  **Protocol:** Modbus (port 12345)
  - **Authentication:** HMAC with prior secret.
 - **Description:** Modbus communication for sending and receiving data from the SCADA server.
 
-**Description of Normal Operation**
+## Description of Normal Operation
    - Screenshots and comments illustrating the running simulation environment under normal conditions.
 
-**Description of the Attack Scenario and Steps to Reproduce the Attack**
+## Description of the Attack Scenario and Steps to Reproduce the Attack
    - Detailed information on the attack scenario, potential vulnerabilities, and steps to reproduce the attack.
 
 
