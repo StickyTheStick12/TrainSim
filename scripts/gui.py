@@ -19,7 +19,7 @@ from cryptography.hazmat.primitives.asymmetric import dh
 from cryptography.fernet import Fernet
 
 try:
-    os.remove(os.path.join(os.getcwd(), "logs", "GUI.log"))
+    os.remove(os.path.join(os.path.dirname(os.getcwd()), "logs", "GUI.log"))
 except FileNotFoundError:
     pass
 
