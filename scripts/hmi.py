@@ -12,6 +12,7 @@ import bcrypt
 # train tcp listening on port 15000
 
 # TODO: fix so we have key rotation for train
+# TODO: timetable updates even if the hmi train isn't in the timetable
 
 import bisect
 import json
@@ -98,7 +99,8 @@ send_data = asyncio.Event()
 hmi_data_queue = multiprocessing.Queue()
 modbus_data_queue = asyncio.Queue()
 
-app = Flask(__name__)
+app = Flask(__name__, template_folder=os.path.join(os.path.dirname(os.getcwd()), "templates"),
+            static_folder=os.path.join(os.path.dirname(os.getcwd()), "static"))
 app.logger.setLevel(logging.ERROR)
 
 log = logging.getLogger('werkzeug')
@@ -167,6 +169,7 @@ def loginPage(invalid=False):
             return redirect(url_for('timetablePage'))
         else:
             invalid = True
+
             return render_template("login.html", invalid=invalid, loginPage=True)
 
     return render_template("login.html", invalid=invalid, loginPage=True)
@@ -398,12 +401,18 @@ async def communication_with_trains() -> None:
             logging.info("Connection to asyncio server failed. Retrying...")
             await asyncio.sleep(1)  # Wait for a while before retrying
 
-    train_key = await dh_exchange(reader_train, writer_train)
+    derived_key = await dh_exchange(reader_train, writer_train)
+
+    train_key = base64.urlsafe_b64encode(derived_key)
 
     loop.create_task(read_comm_with_trains(reader_train, writer_train, data_queue, recv_data))
 
     while True:
         data = await train_queue.get()
+
+        logging.info("Received train")
+
+        logging.info(data)
 
         data = " ".join(str(value) for value in data)
 
@@ -431,7 +440,7 @@ async def communication_with_trains() -> None:
 
             logging.info(data_to_send)
 
-            logging.debug("Sending data")
+            logging.info("Sending data")
             packed_data = struct.pack('!I{}I'.format(len(data_to_send)), len(data_to_send), *data_to_send)
             header_packed_data = struct.pack('!II', MESSAGE_TYPE_PACKED, len(packed_data))
             combined_data_packed_data = header_packed_data + packed_data
@@ -441,19 +450,19 @@ async def communication_with_trains() -> None:
             expected_signature = [ord(char) for char in
                                   hmac.new(train_key, str(nonce).encode(), hashlib.sha256).hexdigest()]
 
-            logging.debug(f"nonce {str(nonce)}")
-            logging.debug(f"Expecting: {expected_signature}")
+            logging.info(f"nonce {str(nonce)}")
+            logging.info(f"Expecting: {expected_signature}")
 
             recv_data.set()
 
-            packed_data = await data_queue.get()
+            received_signature = await data_queue.get()
 
-            received_signature = list(struct.unpack('!64I', packed_data))
+            recv_data.clear()
 
             logging.info(received_signature)
 
             if received_signature == expected_signature:
-                logging.debug("Client is verified")
+                logging.info("Client is verified")
                 client_verified = True
             else:
                 logging.critical("Found wrong signature in holding register")
@@ -468,51 +477,65 @@ async def read_comm_with_trains(reader: asyncio.StreamReader, writer: asyncio.St
     while True:
         data = await reader.read(1024)
 
-        if t_event.is_set():
-            await data_queue.put(data)
-        else:
-            data_id = data[0]
-            amount_to_read = data[1]
+        logging.info("Received data")
 
-            received_data = "".join(
-                chr(char) for char in data[2:2 + amount_to_read + 1
-                                             + 2 + 1 + 64])
+        received_header = data[:8]
+        message_type, data_length = struct.unpack('!II', received_header)
 
-            nonce = received_data[1 + amount_to_read:1 + amount_to_read + 2]
-            signature = received_data[1 + amount_to_read + 3:]
+        if message_type == 1:
+            logging.info("Received data to train")
+            # unpacked_length = struct.unpack('!I', data[4:8])[0]
+            data = list(struct.unpack('!{}I'.format(data_length // 4), data[8:]))
 
-            data = received_data[:amount_to_read].split(" ")
-
-            if not data_id > sequence_number_train:
-                continue
-
-            sequence_number_train = data_id
-
-            # verify signature
-            calc_signature = " ".join(str(value) for value in data) + str(data_id)
-            logging.debug(f"calculating signature for this {calc_signature}")
-            calc_signature = hmac.new(train_key, calc_signature.encode(), hashlib.sha256).hexdigest()
-
-            if signature == calc_signature:
-                # calculate new signature for nonce
-                nonce = [ord(char) for char in nonce]
-
-                calc_signature = hmac.new(train_key, str(nonce).encode(), hashlib.sha256).hexdigest()
-
-                calc_signature = [ord(char) for char in calc_signature]
-                logging.info(calc_signature)
-
-                packed_data = struct.pack('!64I', *calc_signature)
-
-                writer.write(packed_data)
-                await writer.drain()
-
-                logging.info("Verified signature on data, notified gui.")
-
-                # put data in queue for the GUI thread
-                await modbus_data_queue.put(data)
+            if t_event.is_set():
+                logging.info("Data is signature")
+                await data_queue.put(data)
             else:
-                logging.critical("Found wrong signature in data")
+                data = data[1:]
+                data_id = data[0]
+                amount_to_read = data[1]
+
+                received_data = "".join(
+                    chr(char) for char in data[2:2 + amount_to_read + 1
+                                                 + 2 + 1 + 64])
+
+                nonce = received_data[1 + amount_to_read:1 + amount_to_read + 2]
+                signature = received_data[1 + amount_to_read + 3:]
+
+                data = received_data[:amount_to_read].split(" ")
+
+                if not data_id > sequence_number_train:
+                    continue
+
+                sequence_number_train = data_id
+
+                # verify signature
+                calc_signature = " ".join(str(value) for value in data) + str(data_id)
+                logging.debug(f"calculating signature for this {calc_signature}")
+                calc_signature = hmac.new(train_key, calc_signature.encode(), hashlib.sha256).hexdigest()
+
+                if signature == calc_signature:
+                    # calculate new signature for nonce
+                    nonce = [ord(char) for char in nonce]
+
+                    calc_signature = hmac.new(train_key, str(nonce).encode(), hashlib.sha256).hexdigest()
+
+                    calc_signature = [ord(char) for char in calc_signature]
+                    logging.info(calc_signature)
+
+                    packed_data = struct.pack('!64I', *calc_signature)
+                    header_packed_data = struct.pack('!II', 1, len(packed_data))
+                    combined_data_packed_data = header_packed_data + packed_data
+
+                    writer.write(combined_data_packed_data)
+                    await writer.drain()
+
+                    logging.info("Verified signature on data, notified simulation.")
+
+                    # put data in queue for simulation
+                    await modbus_data_queue.put(data)
+                else:
+                    logging.critical("Found wrong signature in data")
 
 
 async def modbus_server_thread(context: ModbusServerContext) -> None:
@@ -940,6 +963,10 @@ async def arrival() -> None:
                                  first_entry['TrackAtLocation'], first_entry['id']]
                     await train_queue.put(new_train)
 
+                    logging.info(new_train)
+
+                    logging.info("Created new train")
+
                     break
 
             created_trains.append(first_entry['id'])
@@ -1207,13 +1234,13 @@ async def acquire_switch(switch_queue: asyncio.Queue) -> None:
     global serving_id
     global switch_given_to
 
-    wish = ["arrive", "depart"]
+    wish = ["depart", "arrive"]
 
     while True:
         data = await switch_queue.get()
-        logging.info(f"Got new switch request from train with id: {data[2]}. It wishes to {wish[data[0]]}")
+        logging.info(f"Got new switch request from train with id: {data[2]}. It wishes to {wish[int(data[0])]}")
 
-        serving_id = data[2]
+        serving_id = int(data[2])
 
         # Calculate how long it was since the last switch request
         difference = max(timedelta(minutes=0), last_acquired_switch + timedelta(minutes=2) - datetime.now())
@@ -1236,12 +1263,12 @@ async def acquire_switch(switch_queue: asyncio.Queue) -> None:
         # Update last_acquired_switch after the while loop
         last_acquired_switch = datetime.now()
 
-        switch_given_to = data[2]
+        switch_given_to = int(data[2])
 
-        await modbus_data_queue.put(["Z", data[1]])
-        await train_queue.put(["G", data[2]])
+        await modbus_data_queue.put(["Z", str(data[1])])
+        await train_queue.put(["G", str(data[2])])
 
-        switch_status = data[1]
+        switch_status = int(data[1])
         await modbus_data_queue.put(["S", str(switch_status)])
         await departure_to_data()
 
@@ -1700,23 +1727,23 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
             case "a":
                 logging.info("Received arrival update from a train")
 
-                arrived_trains.append(data[1])
+                arrived_trains.append(int(data[2]))
 
                 switch_status, sequence_number_switch = await get_switch_status(context, switch_key,
                                                                                 sequence_number_switch)
 
-                if switch_status != int(data[2]):
+                if switch_status != data[1]:
                     logging.info("Updating track in json, due to switch status being different to expected track")
-                    await modbus_data_queue.put(["S", str(switch_status)])
                     await modbus_data_queue.put(["u", data[2], str(switch_status)])
 
-                    msg = [
-                        "T",
-                        data[1],
-                        data[2]
-                    ]
+                await modbus_data_queue.put(["S", str(switch_status)])
 
-                    await train_queue.put(msg)
+                msg = [
+                    "T",
+                    data[2],
+                    str(switch_status)
+                ]
+                await train_queue.put(msg)
 
                 await modbus_data_queue.put(["H", str(switch_status)])
             case "s":
@@ -1735,27 +1762,34 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                     difference = max((last_acquired_switch - datetime.now()).total_seconds(), 0)
                     update_time = (3 * 60 * switch_queue.qsize() + 60 * (switch_queue.qsize() - 1) + difference) // 60
 
-                    if data[1] == 0:
+                    if int(data[1]) == 0:
                         logging.info("Received switch update from departure function")
 
                         json_data = await read_from_file(1)
 
-                        json_data[0]["EstimatedTime"] = (datetime.now() + timedelta(
-                            minutes=update_time) - timedelta(minutes=1)).strftime("%Y-%m-%d %H:%M")
+                        for i in range(len(json_data)):
+                            if json_data[i]['id'] == data[3]:
+                                json_data[i]["EstimatedTime"] = (
+                                        datetime.now() + timedelta(minutes=update_time) - timedelta(
+                                    minutes=1)).strftime("%Y-%m-%d %H:%M")
 
-                        await write_to_file(json_data, 1)
+                                await write_to_file(json_data, 1)
 
-                        await modbus_data_queue.put(["U", str(0), json_data[0]['EstimatedTime'],
-                                                     json_data[0]['TrackAtLocation']])
+                                await modbus_data_queue.put(["U", str(i), json_data[i]['EstimatedTime'],
+                                                             json_data[i]['TrackAtLocation']])
                     else:
                         logging.info("Received switch update from arrival function")
 
                         json_data = await read_from_file(0)
                         n_time = (datetime.now() + timedelta(minutes=update_time) - timedelta(minutes=1))
-                        if datetime.strptime(json_data[0]["EstimatedTime"], "%Y-%m-%d %H:%M") != n_time:
-                            json_data[0]["EstimatedTime"] = n_time.strftime("%Y-%m-%d %H:%M")
-                            await write_to_file(json_data, 0)
-                            await update_departure_time(json_data[0]['id'], n_time, True)
+
+                        for i in range(len(json_data)-1, -1, -1):
+                            if json_data[i]['id'] == data[3]:
+                                if datetime.strptime(json_data[i]["EstimatedTime"], "%Y-%m-%d %H:%M") != n_time:
+                                    json_data[i]["EstimatedTime"] = n_time.strftime("%Y-%m-%d %H:%M")
+                                    await write_to_file(json_data, 0)
+                                    await update_departure_time(json_data[i]['id'], n_time, True)
+                                    break
             case "r":
                 logging.info("Received removal wish")
 
@@ -1847,7 +1881,7 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
 
                     logging.info("Cleared track")
                     track_semaphore.release()
-                    await modbus_data_queue.put(["T", data[1], "A"])
+                    await modbus_data_queue.put(["T", str(data[1]), "A"])
 
                 await departure_to_data()
             case "u":
@@ -1911,6 +1945,7 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                 idx = bisect.bisect_left(merged_existing_times, estimated_time)
 
                 is_found = False
+                arrival_idx = 0
 
                 # case 1: can be scheduled before all the other trains
                 if idx == 0:
@@ -1925,7 +1960,6 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                                       'TrainOwner': "hmi",
                                       'id': str(available_id)}
 
-                        arrival_idx = 0
                         arrival_data.insert(arrival_idx, train_data)
 
                         is_found = True
@@ -2084,6 +2118,9 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
 
                 await write_to_file(departure_data, 1)
                 await departure_to_data()
+
+                if arrival_idx == 0:
+                    wake_arrival.set()
 
                 for i in range(3, -1, -1):
                     await modbus_data_queue.put(["B", str(i)])
