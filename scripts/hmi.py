@@ -1499,8 +1499,9 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
     # remove old json files
     try:
         logging.info("Removed old files")
-        os.remove("departure.json")
-        os.remove("arrival.json")
+        os.remove(os.path.join(os.path.dirname(os.getcwd()), "JSONs", "departure.json"))
+        os.remove(os.path.join(os.path.dirname(os.getcwd()), "JSONs", "arrival.json"))
+
     except FileNotFoundError:
         pass
 
