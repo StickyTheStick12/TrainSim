@@ -29,8 +29,8 @@ from cryptography.fernet import Fernet
 datastore_size = 95  # cant be bigger than 125
 modbus_port = 13000
 
-cert = os.path.join(os.getcwd(), "TLS", "track_cert.pem")
-key = os.path.join(os.getcwd(), "TLS", "track_key.pem")
+cert = os.path.join(os.path.dirname(os.getcwd()), "TLS", "track_cert.pem")
+key = os.path.join(os.path.dirname(os.getcwd()), "TLS", "track_key.pem")
 
 track_status = [0]*6
 track_updates = [0]*6
