@@ -333,14 +333,15 @@ def logPage():
 
 
 def open_json(json_file):
-    with mutex, open(json_file, 'r') as dataFile:
+    with mutex, open(os.path.join(os.path.dirname(os.getcwd()), "JSONs", json_file), 'r') as dataFile:
         json_data = json.load(dataFile)
     return json_data
 
 
 def writeToJson(json_file, data_json):
     data_json = json.dumps(data_json, indent=3)
-    with mutex, open(json_file, 'w') as dataFile:
+
+    with mutex, open(os.path.join(os.path.dirname(os.getcwd()), "JSONs", json_file), 'w') as dataFile:
         dataFile.write(data_json)
 
 
@@ -1081,7 +1082,7 @@ async def departure_to_data():
     """Copies departure.json to data.json for the hmi"""
     departure_data = await read_from_file(1)
 
-    with mutex, open('data.json', 'r') as datafile:
+    with mutex, open(os.path.join(os.path.dirname(os.getcwd()), "JSONs", "data.json"), "r") as datafile:
         data = json.load(datafile)
 
     for i in range(1, 7):
@@ -1100,7 +1101,7 @@ async def departure_to_data():
             'track': departure_data[i]['TrackAtLocation']
         })
 
-    with mutex, open('data.json', 'w') as datafile:
+    with mutex, open(os.path.join(os.path.dirname(os.getcwd()), "JSONs", "data.json"), "w") as datafile:
         json.dump(data, datafile, indent=3)
 
 
@@ -1121,7 +1122,7 @@ async def write_to_file(data: Union[dict, List], file_nr: int) -> None:
 
         # Write content to the file
         async with arrival_file_mutex:
-            with open("arrival.json", 'w') as file:
+            with open(os.path.join(os.path.dirname(os.getcwd()), "JSONs", "arrival.json"), 'w') as file:
                 file.write(content)
 
         arrival_file_version += 1
@@ -1135,7 +1136,7 @@ async def write_to_file(data: Union[dict, List], file_nr: int) -> None:
 
         # Write content to the file
         async with departure_file_mutex:
-            with open("departure.json", 'w') as file:
+            with open(os.path.join(os.path.dirname(os.getcwd()), "JSONs", "departure.json"), 'w') as file:
                 file.write(content)
 
         departure_file_version += 1
@@ -1150,7 +1151,7 @@ async def read_from_file(file_nr: int) -> Union[dict, List]:
     if file_nr == 0:
         try:
             async with arrival_file_mutex:
-                with open("arrival.json", 'r') as file:
+                with open(os.path.join(os.path.dirname(os.getcwd()), "JSONs", "arrival.json"), 'r') as file:
                     content = file.read()
         except (FileNotFoundError, json.JSONDecodeError):
             logging.error("Cannot find or decode file")
@@ -1172,7 +1173,7 @@ async def read_from_file(file_nr: int) -> Union[dict, List]:
     else:
         try:
             async with departure_file_mutex:
-                with open("departure.json", 'r') as file:
+                with open(os.path.join(os.path.dirname(os.getcwd()), "JSONs", "departure.json"), 'r') as file:
                     content = file.read()
         except (FileNotFoundError, json.JSONDecodeError):
             logging.error("Cannot find or decode file")
