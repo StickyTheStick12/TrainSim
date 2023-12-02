@@ -12,9 +12,6 @@ import bcrypt
 # train tcp listening on port 15000
 
 # TODO: fix so we have key rotation for train
-# TODO fix modbus packet u so it updates the time in the train too
-# TODO check packet r
-# TODO cant send file_key over tcp wtf?????
 
 import bisect
 import json
@@ -60,7 +57,7 @@ except FileNotFoundError:
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(funcName)s - %(message)s', level=logging.INFO)
 
 # Create a FileHandler to write log messages to a file
-file_handler = logging.FileHandler(os.path.join(os.getcwd(), "logs", 'HMI.log'))
+file_handler = logging.FileHandler(os.path.join(os.path.dirname(os.getcwd()), "logs", 'HMI.log'))
 file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(funcName)s - %(message)s'))
 logging.getLogger().addHandler(file_handler)
 
@@ -68,8 +65,8 @@ logging.getLogger().addHandler(file_handler)
 datastore_size = 95  # cant be bigger than 125
 modbus_port = 12345
 
-cert = os.path.join(os.getcwd(), "TLS", "cert.pem")
-key = os.path.join(os.getcwd(), "TLS", "key.pem")
+cert = os.path.join(os.path.dirname(os.getcwd()), "TLS", "cert.pem")
+key = os.path.join(os.path.dirname(os.getcwd()), "TLS", "key.pem")
 
 arrival_file_mutex = asyncio.Lock()
 departure_file_mutex = asyncio.Lock()
@@ -940,7 +937,8 @@ async def arrival() -> None:
 
             created_trains.append(first_entry['id'])
 
-            del json_data[0]
+            json_data[0]['IsRemoved'] = True
+            json_data.append(json_data.pop(0))
             await write_to_file(json_data, 0)
 
             # sleep 2 seconds so we can send data to the gui so it will show that the train has arrived
@@ -968,7 +966,6 @@ async def hmi_helper() -> None:
         await modbus_data_queue.put(data)
 
 
-# TODO
 async def update_departure_time(id: str, est_time: datetime, has_changed: bool) -> None:
     """Updates the departure time based on the arrival time"""
     global entries_in_gui
@@ -1010,17 +1007,6 @@ async def update_departure_time(id: str, est_time: datetime, has_changed: bool) 
         departure_data.insert(idx, depart_train)
 
         await write_to_file(departure_data, 1)
-
-        # Check if the update is for the first entry or if it was inserted at the beginning
-        if corresponding_depart_index == 0 or idx == 0:
-            wake_departure.set()
-
-            if departure_switch_request.is_set():
-                if serving_departure.is_set():
-                    give_up_switch.set()
-
-            # TODO we may have a problem if we update the time and it has requested the switch
-            logging.info("Waking departure")
 
         # Check if the corresponding index is the same as the inserted index
         if corresponding_depart_index == idx:
@@ -1780,7 +1766,6 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                             has_arrived = True
                         else:
                             logging.info("Train hasn't arrived yet")
-                            track_reservations[int(train["TrackAtLocation"]) - 1] = 0
 
                             for j in range(len(created_trains)):
                                 if data[2] == created_trains[j]:
@@ -1790,14 +1775,15 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                                     ]
                                     await train_queue.put(msg)
                                     del created_trains[j]
+                                    track_reservations[int(train["TrackAtLocation"]) - 1] = 0
+
                                     break
 
-                            if switch_queue.qsize() > 0:
-                                for i in range(switch_queue.qsize()):
-                                    t = await switch_queue.get()
+                            for i in range(switch_queue.qsize()):
+                                t = await switch_queue.get()
 
-                                    if t[3] != data[2]:
-                                        await switch_queue.put(t)
+                                if t[3] != data[2]:
+                                    await switch_queue.put(t)
 
                         if idx == 0:
                             wake_arrival.set()
