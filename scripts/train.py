@@ -30,14 +30,14 @@ update_key_event = asyncio.Event()
 mutex = asyncio.Lock()
 
 try:
-    os.remove(os.path.join(os.getcwd(), "logs", "Train.log"))
+    os.remove(os.path.join(os.path.dirname(os.getcwd()), "logs", "train.log"))
 except FileNotFoundError:
     pass
 
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(funcName)s - %(message)s', level=logging.INFO)
 
 # Create a FileHandler to write log messages to a file
-file_handler = logging.FileHandler(os.path.join(os.getcwd(), "logs", 'Train.log'))
+file_handler = logging.FileHandler(os.path.join(os.path.dirname(os.getcwd()), "logs", 'train.log'))
 file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(funcName)s - %(message)s'))
 logging.getLogger().addHandler(file_handler)
 
