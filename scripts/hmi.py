@@ -497,7 +497,7 @@ async def read_comm_with_trains(reader: asyncio.StreamReader, writer: asyncio.St
 
             data = received_data[:amount_to_read].split(" ")
 
-            if not data_id > sequence_number_train:
+            if not data_id >= sequence_number_train:
                 continue
 
             sequence_number_train = data_id
