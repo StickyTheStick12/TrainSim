@@ -23,7 +23,8 @@ sequence_number_sim = 0
 data_queue = asyncio.Queue()
 
 MESSAGE_TYPE_PACKED = 1
-MESSAGE_TYPE_SINGLE_CHAR = 2
+MESSAGE_TYPE_SINGLE = 2
+MESSAGE_TYPE_SIGNATURE = 3
 
 track_queue = asyncio.Queue()
 track_key = b""
@@ -394,7 +395,7 @@ async def handle_data() -> None:
                         trains[i][3].set()
 
 
-async def read_data_sim(reader: asyncio.StreamReader, writer: asyncio.StreamWriter, recv_queue: asyncio.Queue, recv_event: asyncio.Event) -> None:
+async def read_data_sim(reader: asyncio.StreamReader, writer: asyncio.StreamWriter, recv_queue: asyncio.Queue) -> None:
     global sequence_number_sim
     global secret_key_sim
     global data_queue
@@ -411,11 +412,6 @@ async def read_data_sim(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
             logging.info("Received data to train")
             # unpacked_length = struct.unpack('!I', data[4:8])[0]
             data = list(struct.unpack('!{}I'.format(data_length // 4), data[8:]))
-
-            if recv_event.is_set():
-                logging.info("Signature for sent data")
-                await recv_queue.put(data)
-                continue
 
             data = data[1:]
             data_id = data[0]
@@ -453,7 +449,7 @@ async def read_data_sim(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
                 logging.info(calc_signature)
 
                 packed_data = struct.pack('!64I', *calc_signature)
-                header_packed_data = struct.pack('!II', 1, len(packed_data))
+                header_packed_data = struct.pack('!II', MESSAGE_TYPE_SIGNATURE, len(packed_data))
                 combined_data_packed_data = header_packed_data + packed_data
 
                 writer.write(combined_data_packed_data)
@@ -465,6 +461,10 @@ async def read_data_sim(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
                 await data_queue.put(data)
             else:
                 logging.critical("Found wrong signature in data")
+        elif message_type == MESSAGE_TYPE_SIGNATURE:
+            data = list(struct.unpack('!{}I'.format(data_length // 4), data[8:]))
+
+            await recv_queue.put(data)
         else:
             received_single_char = data[8:8 + data_length]
 
@@ -523,13 +523,12 @@ async def read_data_sim(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
 
 
 async def handle_server() -> None:
-    async def receive_data(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+    async def write_data(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         global secret_key_sim
         global sequence_number_sim
         global send_queue
 
         recv_queue = asyncio.Queue()
-        recv_event = asyncio.Event()
 
         p = 0xFFFFFFFFFFFFFFFFC90FDAA22168C234C4C6628B80DC1CD129024E088A67CC74020BBEA63B139B22514A08798E3404DDEF9519B3CD3A431B302B0A6DF25F14374FE1356D6D51C245E485B576625E7EC6F44C42E9A637ED6B0BFF5CB6F406B7EDEE386BFB5A899FA5AE9F24117C4B1FE649286651ECE45B3DC2007CB8A163BF0598DA48361C55D39A69163FA8FD24CF5F83655D23DCA3AD961C62F356208552BB9ED529077096966D670C354E4ABC9804F1746C08CA18217C32905E462E36CE3BE39E772C180E86039B2783A2EC07A28FB5C55DF06F4C52C9DE2BCBF6955817183995497CEA956AE515D2261898FA051015728E5A8AACAA68FFFFFFFFFFFFFFFF
         g = 2
@@ -564,7 +563,7 @@ async def handle_server() -> None:
 
         loop = asyncio.get_event_loop()
 
-        loop.create_task(read_data_sim(reader, writer, recv_queue, recv_event))
+        loop.create_task(read_data_sim(reader, writer, recv_queue))
 
         while True:
             data = await send_queue.get()
@@ -608,11 +607,7 @@ async def handle_server() -> None:
                 logging.debug(f"nonce {str(nonce)}")
                 logging.debug(f"Expecting: {expected_signature}")
 
-                recv_event.set()
-
                 received_signature = await recv_queue.get()
-
-                recv_event.clear()
 
                 logging.info(received_signature)
 
@@ -622,7 +617,7 @@ async def handle_server() -> None:
                 else:
                     logging.critical("Found wrong signature in holding register")
 
-    server = await asyncio.start_server(receive_data, "localhost", 15000)
+    server = await asyncio.start_server(write_data, "localhost", 15000)
     async with server:
         await server.serve_forever()
 
@@ -636,4 +631,3 @@ if __name__ == "__main__":
     loop.create_task(handle_track_data())
     loop.create_task(handle_data())
     loop.run_until_complete(handle_server())
-
