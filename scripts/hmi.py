@@ -126,6 +126,10 @@ train_queue = asyncio.Queue()
 sequence_number_train = 0
 train_key = b""
 
+MESSAGE_TYPE_PACKED = 1
+MESSAGE_TYPE_SINGLE_CHAR = 2
+MESSAGE_TYPE_SIGNATURE = 3
+
 
 class Users(UserMixin):
     def __init__(self, username, password, is_active=True):
@@ -386,9 +390,7 @@ async def communication_with_trains() -> None:
     global train_queue
     global sequence_number_train
     global train_key
-    MESSAGE_TYPE_PACKED = 1
     data_queue = asyncio.Queue()
-    recv_data = asyncio.Event()
 
     loop = asyncio.get_event_loop()
 
@@ -404,7 +406,7 @@ async def communication_with_trains() -> None:
 
     train_key = base64.urlsafe_b64encode(derived_key)
 
-    loop.create_task(read_comm_with_trains(reader_train, writer_train, data_queue, recv_data))
+    loop.create_task(read_comm_with_trains(reader_train, writer_train, data_queue))
 
     while True:
         data = await train_queue.get()
@@ -452,13 +454,10 @@ async def communication_with_trains() -> None:
             logging.info(f"nonce {str(nonce)}")
             logging.info(f"Expecting: {expected_signature}")
 
-            recv_data.set()
-
             received_signature = await data_queue.get()
 
-            recv_data.clear()
-
             logging.info(received_signature)
+            logging.info(expected_signature)
 
             if received_signature == expected_signature:
                 logging.info("Client is verified")
@@ -467,8 +466,7 @@ async def communication_with_trains() -> None:
                 logging.critical("Found wrong signature in holding register")
 
 
-async def read_comm_with_trains(reader: asyncio.StreamReader, writer: asyncio.StreamWriter, data_queue: asyncio.Queue,
-                                t_event: asyncio.Event) -> None:
+async def read_comm_with_trains(reader: asyncio.StreamReader, writer: asyncio.StreamWriter, data_queue: asyncio.Queue) -> None:
     """Handles the read data from the trains"""
     global sequence_number_train
     global train_key
@@ -481,60 +479,59 @@ async def read_comm_with_trains(reader: asyncio.StreamReader, writer: asyncio.St
         received_header = data[:8]
         message_type, data_length = struct.unpack('!II', received_header)
 
-        if message_type == 1:
+        if message_type == MESSAGE_TYPE_PACKED:
             logging.info("Received data to train")
             # unpacked_length = struct.unpack('!I', data[4:8])[0]
             data = list(struct.unpack('!{}I'.format(data_length // 4), data[8:]))
 
-            if t_event.is_set():
-                logging.info("Data is signature")
-                await data_queue.put(data)
+            data = data[1:]
+            data_id = data[0]
+            amount_to_read = data[1]
+
+            received_data = "".join(
+                chr(char) for char in data[2:2 + amount_to_read + 1
+                                             + 2 + 1 + 64])
+
+            nonce = received_data[1 + amount_to_read:1 + amount_to_read + 2]
+            signature = received_data[1 + amount_to_read + 3:]
+
+            data = received_data[:amount_to_read].split(" ")
+
+            if not data_id > sequence_number_train:
+                continue
+
+            sequence_number_train = data_id
+
+            # verify signature
+            calc_signature = " ".join(str(value) for value in data) + str(data_id)
+            logging.debug(f"calculating signature for this {calc_signature}")
+            calc_signature = hmac.new(train_key, calc_signature.encode(), hashlib.sha256).hexdigest()
+
+            if signature == calc_signature:
+                # calculate new signature for nonce
+                nonce = [ord(char) for char in nonce]
+
+                calc_signature = hmac.new(train_key, str(nonce).encode(), hashlib.sha256).hexdigest()
+
+                calc_signature = [ord(char) for char in calc_signature]
+                logging.info(calc_signature)
+
+                packed_data = struct.pack('!64I', *calc_signature)
+                header_packed_data = struct.pack('!II', MESSAGE_TYPE_SIGNATURE, len(packed_data))
+                combined_data_packed_data = header_packed_data + packed_data
+
+                writer.write(combined_data_packed_data)
+                await writer.drain()
+
+                logging.info("Verified signature on data, notified simulation.")
+
+                # put data in queue for simulation
+                await modbus_data_queue.put(data)
             else:
-                data = data[1:]
-                data_id = data[0]
-                amount_to_read = data[1]
-
-                received_data = "".join(
-                    chr(char) for char in data[2:2 + amount_to_read + 1
-                                                 + 2 + 1 + 64])
-
-                nonce = received_data[1 + amount_to_read:1 + amount_to_read + 2]
-                signature = received_data[1 + amount_to_read + 3:]
-
-                data = received_data[:amount_to_read].split(" ")
-
-                if not data_id > sequence_number_train:
-                    continue
-
-                sequence_number_train = data_id
-
-                # verify signature
-                calc_signature = " ".join(str(value) for value in data) + str(data_id)
-                logging.debug(f"calculating signature for this {calc_signature}")
-                calc_signature = hmac.new(train_key, calc_signature.encode(), hashlib.sha256).hexdigest()
-
-                if signature == calc_signature:
-                    # calculate new signature for nonce
-                    nonce = [ord(char) for char in nonce]
-
-                    calc_signature = hmac.new(train_key, str(nonce).encode(), hashlib.sha256).hexdigest()
-
-                    calc_signature = [ord(char) for char in calc_signature]
-                    logging.info(calc_signature)
-
-                    packed_data = struct.pack('!64I', *calc_signature)
-                    header_packed_data = struct.pack('!II', 1, len(packed_data))
-                    combined_data_packed_data = header_packed_data + packed_data
-
-                    writer.write(combined_data_packed_data)
-                    await writer.drain()
-
-                    logging.info("Verified signature on data, notified simulation.")
-
-                    # put data in queue for simulation
-                    await modbus_data_queue.put(data)
-                else:
-                    logging.critical("Found wrong signature in data")
+                logging.critical("Found wrong signature in data")
+        elif MESSAGE_TYPE_SIGNATURE:
+            data = list(struct.unpack('!{}I'.format(data_length // 4), data[8:]))
+            await data_queue.put(data)
 
 
 async def modbus_server_thread(context: ModbusServerContext) -> None:
@@ -1511,9 +1508,6 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
     global entries_in_gui
     global sensor_key
 
-    MESSAGE_TYPE_PACKED = 1
-    MESSAGE_TYPE_SINGLE_CHAR = 2
-
     loop = asyncio.get_event_loop()
     switch_queue = asyncio.Queue()
 
@@ -1782,7 +1776,7 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                         json_data = await read_from_file(0)
                         n_time = (datetime.now() + timedelta(minutes=update_time) - timedelta(minutes=1))
 
-                        for i in range(len(json_data)-1, -1, -1):
+                        for i in range(len(json_data) - 1, -1, -1):
                             if json_data[i]['id'] == data[3]:
                                 if datetime.strptime(json_data[i]["EstimatedTime"], "%Y-%m-%d %H:%M") != n_time:
                                     json_data[i]["EstimatedTime"] = n_time.strftime("%Y-%m-%d %H:%M")
@@ -2011,7 +2005,7 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                 departure_idx = bisect.bisect_right(merged_existing_times, departure_estimated_time)
 
                 departure_index = 0
-                
+
                 # case 1: can be scheduled before all the other trains
                 if departure_idx == 0:
                     start_interval = (merged_existing_times[0] - timedelta(minutes=2)) - (
@@ -2122,7 +2116,7 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
 
                 if arrival_idx == 0:
                     wake_arrival.set()
-                
+
                 if departure_index < 4:
                     for i in range(3, -1, -1):
                         await modbus_data_queue.put(["B", str(i)])
