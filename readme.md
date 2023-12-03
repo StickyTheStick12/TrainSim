@@ -244,8 +244,9 @@ The simulation employs various communication protocols to facilitate interaction
    - Screenshots and comments illustrating the running simulation environment under normal conditions.
 
 ## Description of the Attack Scenario and Steps to Reproduce the Attack
-   - Detailed information on the attack scenario, potential vulnerabilities, and steps to reproduce the attack.
+Need knowledge on modbus datastore size for correctly writing the flag correct. 
 
+ 
 ## Key Rotation and Secure Communication
 
 To enhance security measures, the simulation implements key rotation alongside robust cryptographic techniques for secure communication. Key aspects include:
