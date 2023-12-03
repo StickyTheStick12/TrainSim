@@ -1,3 +1,4 @@
+
 ## **Appendix**
 
 - [Introduction - Project Structure](#introduction---project-structure)
@@ -244,7 +245,11 @@ The simulation employs various communication protocols to facilitate interaction
    - Screenshots and comments illustrating the running simulation environment under normal conditions.
 
 ## Description of the Attack Scenario and Steps to Reproduce the Attack
-Need knowledge on modbus datastore size for correctly writing the flag correct. 
+The attack relies on the assumption that the attacker possesses knowledge of how the packages are constructed. It is essential to know the Modbus register size, given the utilization of a flag bit to indicate when a write operation has occurred. Furthermore, the understanding of the data's meaning, the application of HMAC-SHA256, and the existence of a 2-byte nonce within the packet must also be known.
+
+The execution of the attack involves positioning oneself as a proxy between the SCADA server and the switch. In scenarios where ports are open, and the simulation operates over the internet, ARP poisoning is employed to redirect the packets to the attacker. Alternatively, if the simulation runs on the same host, it is assumed that there is already a means of access to the machine, allowing the creation of a Python script and the implementation of four iptables rules.
+
+To carry out the attack, a TCP socket is established for the SCADA server to connect to, and a TCP client is created to connect to the switch. Subsequently, active participation in the Diffie-Hellman key exchange is required, leading to the generation of two distinct keys—one for the SCADA server and another for the switch. Following this, a Modbus client is generated to connect to the simulation, and a Modbus server is established for the switch to connect to.
 
  
 ## Key Rotation and Secure Communication
@@ -293,5 +298,4 @@ In the event of authentication failures during data transmission, the system pri
 
 **References**
     - Citations and references used in the documentation.
-
 
