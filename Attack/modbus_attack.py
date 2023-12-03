@@ -34,6 +34,8 @@ key = os.path.join(os.path.dirname(os.getcwd()), "TLS", "attack_key.pem")
 
 datastore_size = 95
 
+switch_cache = 0
+
 
 async def connect_to_switch() -> None:
     global switch_key
@@ -141,7 +143,6 @@ async def client_for_hmi() -> None:
         """Reads data from holding register"""
         global client
         global highest_data_id
-        switch_status = 1
 
         try:
             while True:
@@ -171,12 +172,12 @@ async def client_for_hmi() -> None:
                             await client.write_registers(0x00, calc_signature, slave=1)
                         elif data[0] == "Y":
                             # TODO
-                            data_to_send = [switch_status] + [ord(char) for char in nonce]
+                            data_to_send = [switch_cache] + [ord(char) for char in nonce]
 
                             calc_signature = hmac.new(hmi_key, str(data_to_send).encode(),
                                                       hashlib.sha256).hexdigest()
 
-                            calc_signature = [switch_status] + [ord(char) for char in calc_signature]
+                            calc_signature = [switch_cache] + [ord(char) for char in calc_signature]
 
                             await client.write_registers(0x00, calc_signature, slave=1)
 
@@ -260,6 +261,9 @@ async def change_packet() -> None:
 
     # Do something with data
 
+    # set switch cache to new track
+    switch_cache = 4
+    
     # data in format "X 4"
     await send_queue.put(data)
 
