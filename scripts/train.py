@@ -427,7 +427,7 @@ async def read_data_sim(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
 
             data = received_data[:amount_to_read].split(" ")
 
-            if not data_id > sequence_number_sim:
+            if not data_id >= sequence_number_sim:
                 continue
 
             sequence_number_sim = data_id
