@@ -299,7 +299,7 @@ In the event of authentication failures during data transmission, the system pri
 **Receiver's Response:**
 - On the receiver side, in case of an authentication failure, the system rejects the incoming data, logs the failure, and awaits the next package. The authentication failure can both be a signature that differs from the received or that the sequence number for the data is lower than the expected.
 
-### Known Limitations
+## Known Limitations
 
 While the simulation strives to represent a realistic train station environment, there are certain limitations that users should be aware of:
 
