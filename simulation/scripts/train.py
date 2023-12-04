@@ -199,53 +199,54 @@ async def handle_train(idx: int) -> None:
 
         current_arrival = this_train[1]
 
-        request_for_switch = [
-            "s",
-            1,  # arrival code
-            this_train[5],
-            this_train[6]
-        ]
+        if current_arrival != '-':
+            request_for_switch = [
+                "s",
+                1,  # arrival code
+                this_train[5],
+                this_train[6]
+            ]
 
-        await send_queue.put(request_for_switch)
-        await this_train[3].wait()
-        logging.info("Train is clear to arrive")
-        this_train[3].clear()
+            await send_queue.put(request_for_switch)
+            await this_train[3].wait()
+            logging.info("Train is clear to arrive")
+            this_train[3].clear()
 
-        if this_train[4].is_set():
-            this_train[4].clear()
-            logging.info("Wakeup event has been set. Return switch")
-            await send_queue.put(["Give up switch message"])
-            trains[idx][0].clear()
-            continue
+            if this_train[4].is_set():
+                this_train[4].clear()
+                logging.info("Wakeup event has been set. Return switch")
+                await send_queue.put(["Give up switch message"])
+                trains[idx][0].clear()
+                continue
 
-        if this_train[1] != '-':
-            wait = current_arrival - datetime.now()
+            if this_train[1] != '-':
+                wait = current_arrival - datetime.now()
 
-            await asyncio.sleep(max(0, wait.total_seconds() - 20))
+                await asyncio.sleep(max(0, wait.total_seconds() - 20))
 
-        if this_train[4].is_set():
-            this_train[4].clear()
-            logging.info("Wakeup event has been set. Return switch")
-            await send_queue.put(["Give up switch message"])
-            trains[idx][0].clear()
-            continue
+            if this_train[4].is_set():
+                this_train[4].clear()
+                logging.info("Wakeup event has been set. Return switch")
+                await send_queue.put(["Give up switch message"])
+                trains[idx][0].clear()
+                continue
 
-        # should hopefully let us change the switch
-        logging.info("Sleeping 20 seconds so we can change the switch")
-        await asyncio.sleep(20)
+            # should hopefully let us change the switch
+            logging.info("Sleeping 20 seconds so we can change the switch")
+            await asyncio.sleep(20)
 
-        # Send an update that the train has now arrived
-        msg = [
-            "a",
-            this_train[5],
-            this_train[6]
-        ]
+            # Send an update that the train has now arrived
+            msg = [
+                "a",
+                this_train[5],
+                this_train[6]
+            ]
 
-        await send_queue.put(msg)
+            await send_queue.put(msg)
 
-        await this_train[3].wait()
-        logging.info("Got track from simulation")
-        this_train[3].clear()
+            await this_train[3].wait()
+            logging.info("Got track from simulation")
+            this_train[3].clear()
 
         msg = [
             this_train[5],
