@@ -70,7 +70,7 @@ The project is organized into two main directories: `attack` and `simulation`. T
 
 ## Installation and Execution Guidelines
 
-For additional help please run: (make help)
+For quick help please run: (make help)
 
 ```bash
 make help 
