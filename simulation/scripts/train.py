@@ -194,56 +194,55 @@ async def handle_train(idx: int) -> None:
 
         current_departure = this_train[2]
 
-        if this_train[1] != "-":
-            current_arrival = this_train[1]
+        current_arrival = this_train[1]
 
+        request_for_switch = [
+            "s",
+            1,  # arrival code
+            this_train[5],
+            this_train[6]
+        ]
 
-            request_for_switch = [
-                "s",
-                1,  # arrival code
-                this_train[5],
-                this_train[6]
-            ]
+        await send_queue.put(request_for_switch)
+        await this_train[3].wait()
+        logging.info("Train is clear to arrive")
+        this_train[3].clear()
 
-            await send_queue.put(request_for_switch)
-            await this_train[3].wait()
-            logging.info("Train is clear to arrive")
-            this_train[3].clear()
+        if this_train[4].is_set():
+            this_train[4].clear()
+            logging.info("Wakeup event has been set. Return switch")
+            await send_queue.put(["Give up switch message"])
+            trains[idx][0].clear()
+            continue
 
-            if this_train[4].is_set():
-                this_train[4].clear()
-                logging.info("Wakeup event has been set. Return switch")
-                await send_queue.put(["Give up switch message"])
-                trains[idx][0].clear()
-                continue
-
+        if this_train[1] != '-':
             wait = current_arrival - datetime.now()
 
             await asyncio.sleep(max(0, wait.total_seconds() - 20))
 
-            if this_train[4].is_set():
-                this_train[4].clear()
-                logging.info("Wakeup event has been set. Return switch")
-                await send_queue.put(["Give up switch message"])
-                trains[idx][0].clear()
-                continue
+        if this_train[4].is_set():
+            this_train[4].clear()
+            logging.info("Wakeup event has been set. Return switch")
+            await send_queue.put(["Give up switch message"])
+            trains[idx][0].clear()
+            continue
 
-            # should hopefully let us change the switch
-            logging.info("Sleeping 20 seconds so we can change the switch")
-            await asyncio.sleep(20)
+        # should hopefully let us change the switch
+        logging.info("Sleeping 20 seconds so we can change the switch")
+        await asyncio.sleep(20)
 
-            # Send an update that the train has now arrived
-            msg = [
-                "a",
-                this_train[5],
-                this_train[6]
-            ]
+        # Send an update that the train has now arrived
+        msg = [
+            "a",
+            this_train[5],
+            this_train[6]
+        ]
 
-            await send_queue.put(msg)
+        await send_queue.put(msg)
 
-            await this_train[3].wait()
-            logging.info("Got track from simulation")
-            this_train[3].clear()
+        await this_train[3].wait()
+        logging.info("Got track from simulation")
+        this_train[3].clear()
 
         msg = [
             this_train[5],
@@ -331,6 +330,7 @@ async def handle_train(idx: int) -> None:
         trains[idx][0].clear()
 
 
+
 async def handle_data() -> None:
     global data_queue
     # N: add a new train
@@ -405,121 +405,135 @@ async def read_data_sim(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
 
         logging.info("Received data from simulation")
 
-        received_header = data[:8]
-        message_type, data_length = struct.unpack('!II', received_header)
+        data = data.decode()
+        logging.info(data)
 
-        if message_type == MESSAGE_TYPE_PACKED:
-            logging.info("Received data to train")
-            # unpacked_length = struct.unpack('!I', data[4:8])[0]
-            data = list(struct.unpack('!{}I'.format(data_length // 4), data[8:]))
+        packets = data.split("]")
 
-            data = data[1:]
-            data_id = data[0]
-            amount_to_read = data[1]
+        for data in packets[:-1]:
+            # Add the "]" back to the packet to form a valid packet
+            data += "]"
 
-            received_data = "".join(
-                chr(char) for char in data[2:2 + amount_to_read + 1
-                                             + 2 + 1 + 64])
+            message_type = int(data[0])
 
-            logging.info(received_data)
-            nonce = received_data[1 + amount_to_read:1 + amount_to_read + 2]
-            signature = received_data[1 + amount_to_read + 3:]
+            if message_type == MESSAGE_TYPE_PACKED:
+                logging.info("Received data to train")
+                # unpacked_length = struct.unpack('!I', data[4:8])[0]
 
-            data = received_data[:amount_to_read].split(" ")
+                data = data[2:-1]
 
-            if not data_id >= sequence_number_sim:
-                continue
+                data = list(ast.literal_eval(data))
 
-            sequence_number_sim = data_id
+                data_id = data[0]
+                amount_to_read = data[1]
 
-            logging.info(data_id)
+                received_data = "".join(
+                    chr(char) for char in data[2:2 + amount_to_read + 1
+                                                 + 2 + 1 + 64])
 
-            # verify signature
-            calc_signature = " ".join(str(value) for value in data) + str(data_id)
-            logging.info(f"calculating signature for this {calc_signature}")
-            calc_signature = hmac.new(secret_key_sim, calc_signature.encode(), hashlib.sha256).hexdigest()
+                logging.info(received_data)
+                nonce = received_data[1 + amount_to_read:1 + amount_to_read + 2]
+                signature = received_data[1 + amount_to_read + 3:]
 
-            if signature == calc_signature:
-                # calculate new signature for nonce
-                nonce = [ord(char) for char in nonce]
+                data = received_data[:amount_to_read].split(" ")
 
-                calc_signature = hmac.new(secret_key_sim, str(nonce).encode(), hashlib.sha256).hexdigest()
+                if not data_id >= sequence_number_sim:
+                    continue
 
-                calc_signature = [ord(char) for char in calc_signature]
-                logging.info(calc_signature)
+                sequence_number_sim = data_id
 
-                packed_data = struct.pack('!64I', *calc_signature)
-                header_packed_data = struct.pack('!II', MESSAGE_TYPE_SIGNATURE, len(packed_data))
-                combined_data_packed_data = header_packed_data + packed_data
+                logging.info(data_id)
 
-                writer.write(combined_data_packed_data)
-                await writer.drain()
+                # verify signature
+                calc_signature = " ".join(str(value) for value in data) + str(data_id)
+                logging.info(f"calculating signature for this {calc_signature}")
+                calc_signature = hmac.new(secret_key_sim, calc_signature.encode(), hashlib.sha256).hexdigest()
 
-                logging.info("Verified signature on data, notified train.")
+                if signature == calc_signature:
+                    # calculate new signature for nonce
+                    nonce = [ord(char) for char in nonce]
 
-                # put data in queue for train
-                await data_queue.put(data)
+                    calc_signature = hmac.new(secret_key_sim, str(nonce).encode(), hashlib.sha256).hexdigest()
+
+                    calc_signature = [ord(char) for char in calc_signature]
+                    logging.info(calc_signature)
+
+                    packed_data = str(calc_signature)
+                    combined_data = "3" + packed_data
+
+                    logging.info(combined_data)
+
+                    async with train_mutex:
+                        writer.write(combined_data.encode())
+                        await writer.drain()
+
+                    logging.info("Verified signature on data, notified train.")
+
+                    # put data in queue for train
+                    await data_queue.put(data)
+                else:
+                    logging.critical("Found wrong signature in data")
+            elif message_type == MESSAGE_TYPE_SIGNATURE:
+                data = data[2:-1]
+
+                data = list(ast.literal_eval(data))
+
+                await recv_queue.put(data)
             else:
-                logging.critical("Found wrong signature in data")
-        elif message_type == MESSAGE_TYPE_SIGNATURE:
-            data = list(struct.unpack('!{}I'.format(data_length // 4), data[8:]))
+                data = data[2:-1]
 
-            await recv_queue.put(data)
-        else:
-            received_single_char = data[8:8 + data_length]
+                if data[0] == "D":
+                    logging.info("Received diffie hellman update wish")
+                    p = 0xFFFFFFFFFFFFFFFFC90FDAA22168C234C4C6628B80DC1CD129024E088A67CC74020BBEA63B139B22514A08798E3404DDEF9519B3CD3A431B302B0A6DF25F14374FE1356D6D51C245E485B576625E7EC6F44C42E9A637ED6B0BFF5CB6F406B7EDEE386BFB5A899FA5AE9F24117C4B1FE649286651ECE45B3DC2007CB8A163BF0598DA48361C55D39A69163FA8FD24CF5F83655D23DCA3AD961C62F356208552BB9ED529077096966D670C354E4ABC9804F1746C08CA18217C32905E462E36CE3BE39E772C180E86039B2783A2EC07A28FB5C55DF06F4C52C9DE2BCBF6955817183995497CEA956AE515D2261898FA051015728E5A8AACAA68FFFFFFFFFFFFFFFF
+                    g = 2
 
-            if received_single_char.decode() == "D":
-                logging.info("Received diffie hellman update wish")
-                p = 0xFFFFFFFFFFFFFFFFC90FDAA22168C234C4C6628B80DC1CD129024E088A67CC74020BBEA63B139B22514A08798E3404DDEF9519B3CD3A431B302B0A6DF25F14374FE1356D6D51C245E485B576625E7EC6F44C42E9A637ED6B0BFF5CB6F406B7EDEE386BFB5A899FA5AE9F24117C4B1FE649286651ECE45B3DC2007CB8A163BF0598DA48361C55D39A69163FA8FD24CF5F83655D23DCA3AD961C62F356208552BB9ED529077096966D670C354E4ABC9804F1746C08CA18217C32905E462E36CE3BE39E772C180E86039B2783A2EC07A28FB5C55DF06F4C52C9DE2BCBF6955817183995497CEA956AE515D2261898FA051015728E5A8AACAA68FFFFFFFFFFFFFFFF
-                g = 2
+                    params_numbers = dh.DHParameterNumbers(p, g)
+                    parameters = params_numbers.parameters(default_backend())
 
-                params_numbers = dh.DHParameterNumbers(p, g)
-                parameters = params_numbers.parameters(default_backend())
+                    private_key = parameters.generate_private_key()
+                    public_key = private_key.public_key()
 
-                private_key = parameters.generate_private_key()
-                public_key = private_key.public_key()
+                    public_key_bytes = public_key.public_bytes(
+                        encoding=serialization.Encoding.PEM,
+                        format=serialization.PublicFormat.SubjectPublicKeyInfo
+                    )
 
-                public_key_bytes = public_key.public_bytes(
-                    encoding=serialization.Encoding.PEM,
-                    format=serialization.PublicFormat.SubjectPublicKeyInfo
-                )
+                    server_public_key = await reader.read(2048)
+                    writer.write(public_key_bytes)
+                    await writer.drain()
 
-                server_public_key = await reader.read(2048)
-                writer.write(public_key_bytes)
-                await writer.drain()
+                    test = await reader.read(1024)
 
-                test = await reader.read(1024)
+                    secret = await choose_characters(test)
 
-                secret = await choose_characters(test)
+                    server_public_key = serialization.load_pem_public_key(server_public_key,
+                                                                          backend=default_backend())
 
-                server_public_key = serialization.load_pem_public_key(server_public_key,
-                                                                      backend=default_backend())
+                    shared_secret = private_key.exchange(server_public_key)
 
-                shared_secret = private_key.exchange(server_public_key)
+                    shared_secret += secret.encode()
 
-                shared_secret += secret.encode()
+                    derived_key = HKDF(
+                        algorithm=hashes.SHA256(),
+                        length=32,
+                        salt=None,
+                        info=b'handshake data',
+                    ).derive(shared_secret)
 
-                derived_key = HKDF(
-                    algorithm=hashes.SHA256(),
-                    length=32,
-                    salt=None,
-                    info=b'handshake data',
-                ).derive(shared_secret)
+                    secret_key = base64.urlsafe_b64encode(derived_key)
 
-                secret_key = base64.urlsafe_b64encode(derived_key)
+                    signature = hmac.new(secret_key, test, hashlib.sha256).hexdigest()
 
-                signature = hmac.new(secret_key, test, hashlib.sha256).hexdigest()
+                    writer.write(signature.encode())
+                    await writer.drain()
+                else:
+                    logging.info("Received wish for ordinary key rotation")
+                    data = await reader.read(1024)
+                    cipher = Fernet(secret_key_sim)
+                    secret_key = cipher.decrypt(data)
 
-                writer.write(signature.encode())
-                await writer.drain()
-            else:
-                logging.info("Received wish for ordinary key rotation")
-                data = await reader.read(1024)
-                cipher = Fernet(secret_key_sim)
-                secret_key = cipher.decrypt(data)
-
-            logging.info("Updated secret key")
-            sequence_number_sim = 0
+                logging.info("Updated secret key")
+                sequence_number_sim = 0
 
 
 async def handle_server() -> None:
@@ -595,11 +609,12 @@ async def handle_server() -> None:
                 logging.info(data_to_send)
 
                 logging.debug("Sending data")
-                packed_data = struct.pack('!I{}I'.format(len(data_to_send)), len(data_to_send), *data_to_send)
-                header_packed_data = struct.pack('!II', MESSAGE_TYPE_PACKED, len(packed_data))
-                combined_data_packed_data = header_packed_data + packed_data
-                writer.write(combined_data_packed_data)
-                await writer.drain()
+                packed_data = str(data_to_send)
+                combined_data_packed_data = "1" + packed_data
+                logging.info(combined_data_packed_data)
+                async with train_mutex:
+                    writer.write(combined_data_packed_data.encode())
+                    await writer.drain()
 
                 expected_signature = [ord(char) for char in
                                       hmac.new(secret_key_sim, str(nonce).encode(), hashlib.sha256).hexdigest()]
