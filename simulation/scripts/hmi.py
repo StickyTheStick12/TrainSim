@@ -133,6 +133,7 @@ MESSAGE_TYPE_PACKED = 1
 MESSAGE_TYPE_SINGLE_CHAR = 2
 MESSAGE_TYPE_SIGNATURE = 3
 
+train_mutex = asyncio.Lock()
 
 class Users(UserMixin):
     def __init__(self, username, password, is_active=True):
