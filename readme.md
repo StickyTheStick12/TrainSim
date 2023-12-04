@@ -1,3 +1,5 @@
+![Alt Text](https://raw.githubusercontent.com/StickyTheStick12/TrainSim/master/High_level_architecture.png)
+
 
 ## **Appendix**
 
