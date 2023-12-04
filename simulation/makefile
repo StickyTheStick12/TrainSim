@@ -1,5 +1,15 @@
-#runs the program as 5 different konsoles its the same as "make kstart"
-all: kstart
+#runs the program as 5 different gnome terminals its the same as "make kstart"
+all: gnomestart
+
+help:
+	@echo "to install all dependencies: make install"
+	@echo "to run program: make all or make gnomestart"
+	@echo "to open webclient use https://127.0.0.1:5001"
+
+install:
+	pip install -r requirements.txt
+	sudo apt update
+	sudo apt install gnome-terminal
 
 #stops the program, is the same as "make stop"
 kill: stop
@@ -36,15 +46,15 @@ kstart:
 #starts the program in three different gnome-terminals requires gnome-terminal and bash
 gnomestart:
 	@echo "Starting Program 1"
-	gnome-terminal -- bash -c "python3 scripts/track_sensors.py; exec bash" &
+	gnome-terminal --title="track_sensors" -- bash -c "python3 scripts/track_sensors.py; exec bash" &
 	@echo "Starting Program 2"
-	gnome-terminal -- bash -c "python3 scripts/gui.py; exec bash" &
+	gnome-terminal --title="gui" -- bash -c "python3 scripts/gui.py; exec bash" &
 	@echo "Starting Program 3"
-	gnome-terminal -- bash -c "python3 scripts/train.py; exec bash" &
+	gnome-terminal --title="train"  -- bash -c "python3 scripts/train.py; exec bash" &
 	@echo "Starting Program 4"
-	gnome-terminal -- bash -c "python3 scripts/switch.py; exec bash" &
+	gnome-terminal --title="switch" -- bash -c "python3 scripts/switch.py; exec bash" &
 	@echo "Starting Program 5"
-	gnome-terminal -- bash -c "python3 scripts/hmi.py; exec bash" &
+	gnome-terminal --title="hmi" -- bash -c "python3 scripts/hmi.py; exec bash" &
 	@echo "------------------"
 	@echo "To close the simulation type 'make stop'"
 
