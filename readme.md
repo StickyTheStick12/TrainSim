@@ -144,6 +144,8 @@ hash = bcrypt.hashpw(your_password.encode(), bcrypt.gensalt())
 ```
 Set the generated hash in the password field.
 
+There is also the possibility to generate a new passsword using this website: [bcrypt-generator.com](https://bcrypt-generator.com/). Gather the given hash and replace it in the password field.
+
 #### Subpages
 
 1. **Timetable Page:**
