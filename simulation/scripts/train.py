@@ -289,7 +289,7 @@ async def handle_train(idx: int) -> None:
             trains[idx][0].clear()
             return
 
-        updated_departure = datetime.strptime(this_train[2], "%Y-%m-%d %H:%M")
+        updated_departure = this_train[2]
 
         if updated_departure == current_departure:
             difference = (updated_departure - datetime.now()).total_seconds()
