@@ -10,7 +10,7 @@
     - [Script Subdirectory](#5-script-subdirectory)
     - [JSONs Subdirectory](#6-jsons-subdirectory)
   
-- [Installation and Execution Guidelines](#installation-and-execution-guidel)
+- [Installation and Execution Guidelines](#installation-and-execution-guidelines)
 - [Architecture Picture](#architecture-picture)
 - [HMI Description](#hmi-description)
   - [GUI Application](#gui-application)
