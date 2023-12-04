@@ -1,0 +1,44 @@
+{
+   "switchStatus": "Track 1",
+   "currentTrackStatus": {
+      "1": "Occupied",
+      "2": "Available",
+      "3": "Available",
+      "4": "Available",
+      "5": "Available",
+      "6": "Available"
+   },
+   "trackStatus": [
+      "Available",
+      "Occupied"
+   ],
+   "trains": [
+      {
+         "trainNumber": "K\u00f6penhamn",
+         "time": "2023-11-08 09:47",
+         "track": "1"
+      },
+      {
+         "trainNumber": "Emmaboda",
+         "time": "2023-11-08 10:42",
+         "track": "6"
+      },
+      {
+         "trainNumber": "K\u00f6penhamn",
+         "time": "2023-11-08 10:47",
+         "track": "1"
+      },
+      {
+         "trainNumber": "Emmaboda",
+         "time": "2023-11-08 11:42",
+         "track": "6"
+      },
+      {
+         "trainNumber": "",
+         "time": "",
+         "track": ""
+      }
+   ],
+   "logs": [
+   ]
+}
