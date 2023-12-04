@@ -23,7 +23,7 @@ except FileNotFoundError:
     pass
 
 # Configure the logger
-logging.basicConfig(format='%(asctime)s - %(levelname)s - %(funcName)s - %(message)s', level=logging.INFO)
+logging.basicConfig(format='%(asctime)s - %(levelname)s - %(funcName)s - %(message)s', level=logging.ERROR)
 
 # Create a FileHandler to write log messages to a file
 file_handler = logging.FileHandler(f"{os.getcwd()}/logs/switch.log")
