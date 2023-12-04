@@ -1,0 +1,23 @@
+{% extends "base.html"%} 
+{% block title %}PLC page{% endblock %} 
+
+{% block css %} 
+<link
+rel="stylesheet"
+type="text/css"
+href="{{ url_for('static', filename='logs.css')}}"
+/> 
+{% endblock %}
+
+
+{% block content %} 
+<h1>PLC - Logs</h1>
+<div class="log-container">
+    <div class="log-text">
+        {% for data in logData:%}
+            <p>{{data}}</p>
+        {%endfor%}
+    </div>
+
+</div>
+{% endblock %}

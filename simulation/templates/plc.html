@@ -1,0 +1,108 @@
+{% extends "base.html"%} 
+{% block title %}PLC page{% endblock %} 
+{% block css %} 
+<link
+rel="stylesheet"
+type="text/css"
+href="{{ url_for('static', filename='plc.css')}}"
+/> 
+{% endblock %}
+
+{% block content %} 
+    <a href="{{ url_for('logOutUser') }}" class="logout-button">
+        <img class="logout-img" src="{{ url_for('static', filename='img/logout.png')}}" alt="logga ut bild">
+    </a>
+    <div id="currentTime"></div>
+    <script>
+        function updateClock() {
+            const now = new Date();
+            const hours = now.getHours().toString().padStart(2, '0');
+            const minutes = now.getMinutes().toString().padStart(2, '0');
+            const seconds = now.getSeconds().toString().padStart(2, '0');
+            const timeString = `${hours}:${minutes}:${seconds}`;
+            const clockElement = document.getElementById('currentTime');
+            clockElement.textContent = timeString;
+        }
+        updateClock();
+        setInterval(updateClock, 1000);
+        
+    </script>
+    <div class="container">
+        <div class="timetable">
+            <h1>Timetable</h1>
+            <table id="timetable-design">
+                <tr>
+                    <th>ID</th>
+                    <th>Train Number</th>
+                    <th>Departure Time</th>
+                    <th>Track Number</th>
+                </tr>
+                {%for train in trainList: %}
+
+                    <tr>
+                        <td>{{ loop.index }}</td>
+                        <td>{{ train['trainNumber'] }}</td>
+                        <td>{{ train['time'] }}</td>
+                        <td>{{ train['track'] }}</td>
+                    </tr>
+                {% endfor %}
+            </table>
+            <form action="#" method="POST">
+                {% if change == None %}
+                    <button type="submit" class="timetablebutton" name="button" value="addTimeForm">Add</button> 
+                    <button type="submit" class="timetablebutton" name="button" value="deleteTimeForm">Delete</button>
+                {% elif change == "addTimeForm" %}
+                    <button type="submit" class="timetablebutton" name="button" value="deleteTimeForm">Delete</button>
+                {% else %}
+                    <button type="submit" class="timetablebutton" name="button" value="addTimeForm">Add</button> 
+                {% endif %}
+            </form> 
+            {% if change == "addTimeForm" %}
+                <form action="#" method="POST" class="addTrain">
+                    <label for="trainNumber">Train</label><br>
+                    <input type="text" name="trainNumber" autocomplete="off" required><br>
+                    <label for="departure">Departure</label><br>
+                    <input type="time" id="departure" name="departure" autocomplete="off" required /><br>
+                    <label for="tracks"> Track</label><br>
+                    <input type="radio" id="track1" name="tracktype" value="1"required>
+                    <label for="track1">Track 1</label><br>
+                    <input type="radio" id="track2" name="tracktype" value="2">
+                    <label for="track2">Track 2</label><br>
+                    <button type="submit" name="button" value="addNewTime">Add</button>
+                    
+                </form>
+            {% elif change == "deleteTimeForm" %}
+            <form action="#" method="POST">
+                <label for="id">ID</label><br>
+                <input type="number" name="id" autocomplete="off" required >
+                <button type="submit" name="button" value="deleteTime">Delete</button>
+
+            </form>
+
+            {% endif %}
+        </div>
+
+        <div class="track">
+            <h1>Track 1</h1>
+            <form action="#" method="POST">
+                {% if trackStatusOne == trackStatus[0] %}
+                    <button type="submit" class="track-button" name="button" value="track1">{{trackStatus[0]}}</button>
+                {% else %}
+                    <button type="submit" class="track-button" id="button-occupied" name="button" value="track1">{{trackStatus[1]}}</button>
+                {% endif %}
+            </form>
+        </div>
+
+        <div class="track">
+            <h1>Track 2</h1>
+            <form action="#" method="POST">
+                {% if trackStatusTwo == trackStatus[0] %}
+                    <button type="submit" class="track-button" name="button" value="track2">{{trackStatus[0]}}</button> 
+                {% else %}
+                    <button type="submit" class="track-button" id="button-occupied" name="button" value="track2">{{trackStatus[1]}}</button>
+                {% endif %}
+            </form> 
+        </div>
+
+    </div>
+{% endblock %}
