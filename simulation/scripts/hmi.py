@@ -29,6 +29,7 @@ import aiohttp
 from heapq import merge
 import random
 import struct
+import ast
 
 from pymodbus import __version__ as pymodbus_version
 from pymodbus.datastore import (
@@ -444,31 +445,37 @@ async def communication_with_trains() -> None:
             logging.info(data_to_send)
 
             logging.info("Sending data")
-            packed_data = struct.pack('!I{}I'.format(len(data_to_send)), len(data_to_send), *data_to_send)
-            header_packed_data = struct.pack('!II', MESSAGE_TYPE_PACKED, len(packed_data))
-            combined_data_packed_data = header_packed_data + packed_data
-            writer_train.write(combined_data_packed_data)
-            await writer_train.drain()
+            packed_data = str(data_to_send)
+            combined_data = "1" + packed_data
+
+            logging.info(combined_data)
+
+            async with train_mutex:
+                writer_train.write(combined_data.encode())
+                await writer_train.drain()
 
             expected_signature = [ord(char) for char in
                                   hmac.new(train_key, str(nonce).encode(), hashlib.sha256).hexdigest()]
 
             logging.info(f"nonce {str(nonce)}")
-            logging.info(f"Expecting: {expected_signature}")
+            # logging.info(f"Expecting: {expected_signature}")
 
             received_signature = await data_queue.get()
 
-            logging.info(received_signature)
-            logging.info(expected_signature)
+            logging.info(f"recv sig: {received_signature}")
+            logging.info(f"type sig: {str(type(received_signature))}")
+            logging.info(f"recv sig: {expected_signature}")
+            logging.info(f"type sig: {str(type(expected_signature))}")
 
-            if received_signature == expected_signature:
+            if str(received_signature) == str(expected_signature):
                 logging.info("Client is verified")
                 client_verified = True
             else:
                 logging.critical("Found wrong signature in holding register")
 
 
-async def read_comm_with_trains(reader: asyncio.StreamReader, writer: asyncio.StreamWriter, data_queue: asyncio.Queue) -> None:
+async def read_comm_with_trains(reader: asyncio.StreamReader, writer: asyncio.StreamWriter,
+                                data_queue: asyncio.Queue) -> None:
     """Handles the read data from the trains"""
     global sequence_number_train
     global train_key
@@ -477,63 +484,75 @@ async def read_comm_with_trains(reader: asyncio.StreamReader, writer: asyncio.St
         data = await reader.read(1024)
 
         logging.info("Received data")
+        data = data.decode()
+        logging.info(data)
 
-        received_header = data[:8]
-        message_type, data_length = struct.unpack('!II', received_header)
+        packets = data.split("]")
 
-        if message_type == MESSAGE_TYPE_PACKED:
-            logging.info("Received data to train")
-            # unpacked_length = struct.unpack('!I', data[4:8])[0]
-            data = list(struct.unpack('!{}I'.format(data_length // 4), data[8:]))
+        for data in packets[:-1]:
+            # Add the "]" back to the packet to form a valid packet
+            data += "]"
 
-            data = data[1:]
-            data_id = data[0]
-            amount_to_read = data[1]
+            message_type = int(data[0])
 
-            received_data = "".join(
-                chr(char) for char in data[2:2 + amount_to_read + 1
-                                             + 2 + 1 + 64])
+            if message_type == MESSAGE_TYPE_PACKED:
+                logging.info("Received data to train")
 
-            nonce = received_data[1 + amount_to_read:1 + amount_to_read + 2]
-            signature = received_data[1 + amount_to_read + 3:]
+                data = data[2:-1]
 
-            data = received_data[:amount_to_read].split(" ")
+                data = list(ast.literal_eval(data))
 
-            if not data_id >= sequence_number_train:
-                continue
+                data_id = data[0]
+                amount_to_read = data[1]
 
-            sequence_number_train = data_id
+                received_data = "".join(
+                    chr(char) for char in data[2:2 + amount_to_read + 1
+                                                 + 2 + 1 + 64])
 
-            # verify signature
-            calc_signature = " ".join(str(value) for value in data) + str(data_id)
-            logging.debug(f"calculating signature for this {calc_signature}")
-            calc_signature = hmac.new(train_key, calc_signature.encode(), hashlib.sha256).hexdigest()
+                nonce = received_data[1 + amount_to_read:1 + amount_to_read + 2]
+                signature = received_data[1 + amount_to_read + 3:]
 
-            if signature == calc_signature:
-                # calculate new signature for nonce
-                nonce = [ord(char) for char in nonce]
+                data = received_data[:amount_to_read].split(" ")
 
-                calc_signature = hmac.new(train_key, str(nonce).encode(), hashlib.sha256).hexdigest()
+                if not data_id >= sequence_number_train:
+                    continue
 
-                calc_signature = [ord(char) for char in calc_signature]
-                logging.info(calc_signature)
+                sequence_number_train = data_id
 
-                packed_data = struct.pack('!64I', *calc_signature)
-                header_packed_data = struct.pack('!II', MESSAGE_TYPE_SIGNATURE, len(packed_data))
-                combined_data_packed_data = header_packed_data + packed_data
+                # verify signature
+                calc_signature = " ".join(str(value) for value in data) + str(data_id)
+                logging.debug(f"calculating signature for this {calc_signature}")
+                calc_signature = hmac.new(train_key, calc_signature.encode(), hashlib.sha256).hexdigest()
 
-                writer.write(combined_data_packed_data)
-                await writer.drain()
+                if signature == calc_signature:
+                    # calculate new signature for nonce
+                    nonce = [ord(char) for char in nonce]
 
-                logging.info("Verified signature on data, notified simulation.")
+                    calc_signature = hmac.new(train_key, str(nonce).encode(), hashlib.sha256).hexdigest()
 
-                # put data in queue for simulation
-                await modbus_data_queue.put(data)
-            else:
-                logging.critical("Found wrong signature in data")
-        elif MESSAGE_TYPE_SIGNATURE:
-            data = list(struct.unpack('!{}I'.format(data_length // 4), data[8:]))
-            await data_queue.put(data)
+                    calc_signature = [ord(char) for char in calc_signature]
+                    logging.info(calc_signature)
+
+                    packed_data = str(calc_signature)
+
+                    combined_data = "3" + packed_data
+
+                    logging.info(combined_data)
+
+                    async with train_mutex:
+                        writer.write(combined_data.encode())
+                        await writer.drain()
+
+                    logging.info("Verified signature on data, notified simulation.")
+
+                    # put data in queue for simulation
+                    await modbus_data_queue.put(data)
+                else:
+                    logging.critical("Found wrong signature in data")
+            elif MESSAGE_TYPE_SIGNATURE:
+                data = data[1:]
+                data = list(ast.literal_eval(data))
+                await data_queue.put(data)
 
 
 async def modbus_server_thread(context: ModbusServerContext) -> None:
