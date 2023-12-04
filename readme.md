@@ -70,6 +70,12 @@ The project is organized into two main directories: `attack` and `simulation`. T
 
 ## Installation and Execution Guidelines
 
+For additional help please run: (make help)
+
+```bash
+make help 
+```
+
 To run the program, start by installing the required dependencies. The simplest way is to use the provided requirements list and execute the following command in the simulation folder:
 
 ```bash
