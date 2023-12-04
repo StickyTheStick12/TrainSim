@@ -158,7 +158,7 @@ hash = bcrypt.hashpw(your_password.encode(), bcrypt.gensalt())
 ```
 Set the generated hash in the password field.
 
-There is also the possibility to generate a new passsword using this website: [bcrypt-generator.com](https://bcrypt-generator.com/). Gather the given hash and replace it in the password field.
+Alternatively, you can generate a new password using this website: [bcrypt-generator.com](https://bcrypt-generator.com/). Obtain the given hash and replace it in the password field.
 
 #### Subpages
 
@@ -179,6 +179,7 @@ There is also the possibility to generate a new passsword using this website: [b
    - Contains logs of changes made in the Flask app, showing who made the changes and at what time.
    
 These three subpages are accessible through the navigation bar.
+
 
 ## Back-end (SCADA-like) Server and PLCs Description
 
