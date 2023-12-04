@@ -1,5 +1,4 @@
-![Alt Text](https://raw.githubusercontent.com/StickyTheStick12/TrainSim/master/High_level_architecture.png)
-
+![alt text](https://github.com/StickyTheStick12/TrainSim/blob/master/High_level_architecture.png?raw=true)
 
 ## **Appendix**
 
