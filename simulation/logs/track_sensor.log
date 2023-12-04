@@ -1,0 +1,41 @@
+2023-12-04 10:31:11,615 - INFO - setup_server - Created datastore
+2023-12-04 10:31:11,636 - INFO - setup_server - Created datastore
+2023-12-04 10:31:11,662 - INFO - setup_server - Created datastore
+2023-12-04 10:31:11,679 - INFO - setup_server - Created datastore
+2023-12-04 10:31:11,694 - INFO - setup_server - Created datastore
+2023-12-04 10:31:11,715 - INFO - setup_server - Created datastore
+2023-12-04 10:31:11,790 - INFO - info - Server listening.
+2023-12-04 10:31:11,791 - INFO - info - Server listening.
+2023-12-04 10:31:11,791 - INFO - info - Server listening.
+2023-12-04 10:31:11,792 - INFO - info - Server listening.
+2023-12-04 10:31:11,794 - INFO - info - Server listening.
+2023-12-04 10:31:11,807 - INFO - info - Server listening.
+2023-12-04 10:31:15,935 - INFO - receive_data - Received data
+2023-12-04 10:31:15,935 - INFO - receive_data - Received data
+2023-12-04 10:31:15,935 - INFO - receive_data - 6 1 ô 8afd7ddbb7947d5a78ae9ccb6b7ae55f1e7da250021e5abb56785b751d4dfe05
+2023-12-04 10:31:15,935 - INFO - receive_data - [56, 50, 101, 98, 51, 53, 102, 102, 97, 99, 57, 99, 97, 48, 48, 49, 51, 99, 56, 53, 56, 101, 50, 52, 98, 54, 48, 55, 52, 99, 49, 54, 54, 55, 98, 99, 49, 52, 100, 100, 99, 102, 49, 100, 48, 53, 51, 55, 49, 52, 102, 48, 57, 98, 52, 52, 55, 99, 57, 99, 54, 53, 52, 52]
+2023-12-04 10:31:15,935 - INFO - receive_data - Verified signature on data. Updating status
+2023-12-04 10:32:01,174 - ERROR - default_exception_handler - Task was destroyed but it is pending!
+task: <Task pending name='Task-7' coro=<modbus_server_thread() running at /home/vboxuser/TrainSim-master_new/simulation/scripts/track_sensors.py:346> wait_for=<Future pending cb=[Task.task_wakeup()]>>
+2023-12-04 10:32:01,175 - ERROR - default_exception_handler - Task was destroyed but it is pending!
+task: <Task pending name='Task-1' coro=<handle_train_server() running at /home/vboxuser/TrainSim-master_new/simulation/scripts/track_sensors.py:214> wait_for=<Future pending cb=[Task.task_wakeup()]>>
+2023-12-04 10:32:01,178 - ERROR - default_exception_handler - Task was destroyed but it is pending!
+task: <Task pending name='Task-8' coro=<handle_server() running at /home/vboxuser/TrainSim-master_new/simulation/scripts/track_sensors.py:315> wait_for=<Future pending cb=[Task.task_wakeup()]>>
+2023-12-04 10:32:01,179 - ERROR - default_exception_handler - Task was destroyed but it is pending!
+task: <Task pending name='Task-2' coro=<modbus_server_thread() running at /home/vboxuser/TrainSim-master_new/simulation/scripts/track_sensors.py:346> wait_for=<Future pending cb=[Task.task_wakeup()]>>
+2023-12-04 10:32:01,179 - ERROR - default_exception_handler - Task was destroyed but it is pending!
+task: <Task pending name='Task-3' coro=<modbus_server_thread() running at /home/vboxuser/TrainSim-master_new/simulation/scripts/track_sensors.py:346> wait_for=<Future pending cb=[Task.task_wakeup()]>>
+2023-12-04 10:32:01,180 - ERROR - default_exception_handler - Task was destroyed but it is pending!
+task: <Task pending name='Task-4' coro=<modbus_server_thread() running at /home/vboxuser/TrainSim-master_new/simulation/scripts/track_sensors.py:346> wait_for=<Future pending cb=[Task.task_wakeup()]>>
+2023-12-04 10:32:01,180 - ERROR - default_exception_handler - Task was destroyed but it is pending!
+task: <Task pending name='Task-5' coro=<modbus_server_thread() running at /home/vboxuser/TrainSim-master_new/simulation/scripts/track_sensors.py:346> wait_for=<Future pending cb=[Task.task_wakeup()]>>
+2023-12-04 10:32:01,181 - ERROR - default_exception_handler - Task was destroyed but it is pending!
+task: <Task pending name='Task-6' coro=<modbus_server_thread() running at /home/vboxuser/TrainSim-master_new/simulation/scripts/track_sensors.py:346> wait_for=<Future pending cb=[Task.task_wakeup()]>>
+2023-12-04 10:32:01,181 - ERROR - default_exception_handler - Task was destroyed but it is pending!
+task: <Task pending name='Task-28' coro=<handle_server.<locals>.receive_key() running at /home/vboxuser/TrainSim-master_new/simulation/scripts/track_sensors.py:256> wait_for=<Future pending cb=[Task.task_wakeup()]>>
+2023-12-04 10:32:01,183 - ERROR - default_exception_handler - Task exception was never retrieved
+future: <Task finished name='Task-19' coro=<handle_train_server.<locals>.receive_data() done, defined at /home/vboxuser/TrainSim-master_new/simulation/scripts/track_sensors.py:62> exception=IndexError('list index out of range')>
+Traceback (most recent call last):
+  File "/home/vboxuser/TrainSim-master_new/simulation/scripts/track_sensors.py", line 152, in receive_data
+    track_status[int(data[1]) - 1] = int(data[2])
+IndexError: list index out of range

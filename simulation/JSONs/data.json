@@ -6,7 +6,7 @@
       "3": "Available",
       "4": "Available",
       "5": "Available",
-      "6": "Available"
+      "6": "Occupied"
    },
    "trackStatus": [
       "Available",
@@ -14,31 +14,32 @@
    ],
    "trains": [
       {
-         "trainNumber": "K\u00f6penhamn",
-         "time": "2023-11-08 09:47",
-         "track": "1"
-      },
-      {
          "trainNumber": "Emmaboda",
-         "time": "2023-11-08 10:42",
+         "time": "2023-12-04 10:42",
          "track": "6"
       },
       {
          "trainNumber": "K\u00f6penhamn",
-         "time": "2023-11-08 10:47",
+         "time": "2023-12-04 10:47",
          "track": "1"
       },
       {
          "trainNumber": "Emmaboda",
-         "time": "2023-11-08 11:42",
+         "time": "2023-12-04 11:42",
          "track": "6"
       },
       {
-         "trainNumber": "",
-         "time": "",
-         "track": ""
+         "trainNumber": "K\u00f6penhamn",
+         "time": "2023-12-04 11:47",
+         "track": "1"
       }
    ],
    "logs": [
+      "[2023-12-04 || 10:17:36] Done by User: root, Action: User login, Information: root",
+      "[2023-12-04 || 10:17:45] Done by User: root, Action: Track status changed, Information: Track 6 changed from Occupied to Available",
+      "[2023-12-04 || 10:17:47] Done by User: root, Action: Track status changed, Information: Track 6 changed from available to Occupied",
+      "[2023-12-04 || 10:17:55] Done by User: root, Action: Changed Switch Connection, Information: Switch connection changed from Track 1 to Track 3",
+      "[2023-12-04 || 10:28:56] Done by User: root, Action: Changed Switch Connection, Information: Switch connection changed from Track 1 to Track 2",
+      "[2023-12-04 || 10:29:01] Done by User: root, Action: Changed Switch Connection, Information: Switch connection changed from Track 2 to Track 1"
    ]
 }

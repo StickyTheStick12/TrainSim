@@ -1,0 +1,41 @@
+2023-12-04 10:31:16,109 - INFO - receive_data - Received data
+2023-12-04 10:31:16,242 - INFO - receive_data - Received data to GUI
+2023-12-04 10:31:16,243 - INFO - receive_data - T 6 O × 538260f0f22ac4413c29cfeea3da6088d7db07fce5de3e2befb2ed7e7d9f1a4e
+2023-12-04 10:31:16,243 - INFO - receive_data - [53, 52, 49, 51, 102, 98, 100, 98, 54, 56, 53, 54, 101, 56, 51, 100, 54, 49, 49, 56, 99, 100, 102, 53, 99, 102, 50, 53, 50, 56, 53, 100, 97, 56, 54, 48, 54, 99, 100, 52, 51, 97, 98, 98, 52, 51, 100, 102, 54, 99, 56, 99, 57, 56, 98, 98, 52, 56, 101, 99, 57, 101, 49, 51]
+2023-12-04 10:31:16,243 - INFO - receive_data - Verified signature on data, notified gui.
+2023-12-04 10:31:16,243 - INFO - receive_data - Received data
+2023-12-04 10:31:16,255 - INFO - receive_data - Received data to GUI
+2023-12-04 10:31:16,255 - INFO - receive_data - C 6  521df5b87897eb82c42bc093dc3a657db8e9c6264044e4f0f8bfdb1ea3aafc41
+2023-12-04 10:31:16,255 - INFO - receive_data - [102, 100, 98, 101, 50, 52, 57, 48, 49, 97, 56, 56, 100, 55, 98, 53, 48, 54, 49, 97, 102, 57, 49, 97, 52, 51, 100, 100, 54, 51, 99, 54, 57, 53, 49, 97, 97, 97, 55, 50, 57, 102, 52, 53, 48, 56, 57, 48, 101, 99, 50, 100, 50, 98, 51, 48, 49, 102, 97, 54, 54, 57, 98, 55]
+2023-12-04 10:31:16,255 - INFO - receive_data - Verified signature on data, notified gui.
+2023-12-04 10:31:16,256 - INFO - receive_data - Received data
+2023-12-04 10:31:16,258 - INFO - receive_data - Received data to GUI
+2023-12-04 10:31:16,258 - INFO - receive_data - T 1 O ä³ 1fb9153abaee3e3bfdec7100f47ffe6f46af1d1df9d02e25be644cb4d71337e0
+2023-12-04 10:31:16,258 - INFO - receive_data - [49, 51, 100, 50, 49, 98, 49, 53, 99, 97, 56, 53, 49, 97, 50, 52, 52, 51, 54, 49, 102, 102, 102, 57, 49, 50, 101, 48, 52, 97, 98, 49, 100, 49, 101, 98, 98, 49, 55, 101, 52, 101, 49, 55, 51, 57, 53, 48, 56, 49, 50, 50, 53, 101, 99, 97, 51, 52, 53, 48, 49, 100, 101, 48]
+2023-12-04 10:31:16,258 - INFO - receive_data - Verified signature on data, notified gui.
+2023-12-04 10:31:16,259 - INFO - receive_data - Received data
+2023-12-04 10:31:16,262 - INFO - receive_data - Received data to GUI
+2023-12-04 10:31:16,262 - INFO - receive_data - C 1 S bf17d5d293ec77b3692fbe3c80b89e614bbcf1c5d7ebe59f104a36448ff0196e
+2023-12-04 10:31:16,263 - INFO - receive_data - [57, 49, 55, 49, 100, 54, 98, 101, 97, 50, 56, 54, 48, 49, 55, 99, 100, 99, 56, 50, 50, 99, 101, 50, 102, 55, 51, 50, 100, 97, 52, 102, 101, 53, 99, 101, 50, 56, 50, 57, 56, 48, 50, 101, 51, 54, 54, 49, 51, 51, 97, 56, 56, 50, 48, 57, 57, 50, 54, 101, 53, 98, 56, 98]
+2023-12-04 10:31:16,263 - INFO - receive_data - Verified signature on data, notified gui.
+2023-12-04 10:31:16,263 - INFO - receive_data - Received data
+2023-12-04 10:31:16,269 - INFO - receive_data - Received data to GUI
+2023-12-04 10:31:16,269 - INFO - receive_data - A 0 2023-12-04 10:42 Emmaboda 6 % 355c55c2a33bb85360a277d1847c902094f0c3029f60c19396bdca48a8468db1
+2023-12-04 10:31:16,269 - INFO - receive_data - [55, 57, 48, 102, 100, 54, 55, 98, 54, 55, 56, 49, 100, 50, 99, 55, 52, 102, 54, 100, 54, 57, 48, 48, 54, 55, 57, 57, 53, 52, 49, 99, 55, 98, 50, 100, 52, 52, 101, 50, 97, 55, 102, 98, 101, 55, 100, 53, 51, 101, 98, 57, 55, 50, 51, 49, 55, 54, 49, 54, 52, 97, 99, 52]
+2023-12-04 10:31:16,269 - INFO - receive_data - Verified signature on data, notified gui.
+2023-12-04 10:31:16,269 - INFO - receive_data - Received data
+2023-12-04 10:31:16,275 - INFO - receive_data - Received data to GUI
+2023-12-04 10:31:16,275 - INFO - receive_data - A 1 2023-12-04 10:47 Köpenhamn 1 Ý> 32d2890205841dbe934ddfdd9ae71b1ea4f389afb4bbb47d9c7bcd63670ae176
+2023-12-04 10:31:16,275 - INFO - receive_data - [101, 51, 102, 48, 101, 53, 55, 53, 52, 51, 97, 52, 50, 57, 53, 55, 52, 48, 57, 56, 53, 51, 48, 100, 55, 99, 99, 53, 53, 48, 99, 51, 97, 98, 97, 99, 55, 53, 55, 101, 101, 57, 97, 55, 48, 49, 50, 100, 54, 51, 48, 102, 57, 50, 54, 53, 49, 97, 52, 99, 97, 53, 56, 101]
+2023-12-04 10:31:16,276 - INFO - receive_data - Verified signature on data, notified gui.
+2023-12-04 10:31:16,286 - INFO - receive_data - Received data
+2023-12-04 10:31:16,294 - INFO - receive_data - Received data to GUI
+2023-12-04 10:31:16,294 - INFO - receive_data - A 2 2023-12-04 11:42 Emmaboda 6  830a8199c54c60bddcf10cf728d7b97c29cca03b84750d2af18581026492b490
+2023-12-04 10:31:16,294 - INFO - receive_data - [102, 56, 98, 98, 56, 55, 56, 100, 56, 100, 50, 97, 57, 56, 55, 100, 99, 53, 97, 51, 49, 54, 99, 49, 51, 57, 98, 50, 50, 53, 56, 56, 49, 52, 101, 53, 48, 57, 99, 49, 49, 56, 53, 51, 97, 56, 49, 100, 53, 57, 54, 97, 100, 49, 52, 51, 100, 98, 101, 48, 99, 51, 101, 100]
+2023-12-04 10:31:16,294 - INFO - receive_data - Verified signature on data, notified gui.
+2023-12-04 10:31:16,294 - INFO - receive_data - Received data
+2023-12-04 10:31:16,300 - INFO - receive_data - Received data to GUI
+2023-12-04 10:31:16,300 - INFO - receive_data - A 3 2023-12-04 11:47 Köpenhamn 1 4 0013c899bc685cc245c66ecaa86ba90c309abfe6931acad43bf7971a09be1aec
+2023-12-04 10:31:16,301 - INFO - receive_data - [101, 55, 97, 56, 55, 49, 49, 56, 99, 52, 51, 56, 50, 99, 50, 98, 101, 98, 48, 52, 48, 52, 57, 54, 56, 48, 55, 56, 98, 50, 49, 100, 54, 54, 56, 99, 97, 54, 50, 97, 52, 101, 49, 54, 53, 53, 97, 100, 101, 52, 49, 57, 48, 100, 101, 56, 101, 55, 98, 53, 48, 101, 54, 56]
+2023-12-04 10:31:16,301 - INFO - receive_data - Verified signature on data, notified gui.
+2023-12-04 10:31:16,301 - INFO - receive_data - Received data

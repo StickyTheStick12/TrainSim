@@ -49,7 +49,7 @@ from cryptography.hazmat.primitives.asymmetric import dh
 from cryptography.fernet import Fernet
 
 try:
-    os.remove(os.path.join(os.path.dirname(os.getcwd()), "logs", "HMI.log"))
+    os.remove(f"{os.getcwd()}/logs/HMI.log")
 except FileNotFoundError:
     pass
 
@@ -57,7 +57,7 @@ except FileNotFoundError:
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(funcName)s - %(message)s', level=logging.INFO)
 
 # Create a FileHandler to write log messages to a file
-file_handler = logging.FileHandler(os.path.join(os.path.dirname(os.getcwd()), "logs", 'HMI.log'))
+file_handler = logging.FileHandler(f"{os.getcwd()}/logs/HMI.log")
 file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(funcName)s - %(message)s'))
 logging.getLogger().addHandler(file_handler)
 
@@ -65,8 +65,8 @@ logging.getLogger().addHandler(file_handler)
 datastore_size = 95  # cant be bigger than 125
 modbus_port = 12345
 
-cert = os.path.join(os.path.dirname(os.getcwd()), "TLS", "cert.pem")
-key = os.path.join(os.path.dirname(os.getcwd()), "TLS", "key.pem")
+cert = f"{os.getcwd()}/TLS/cert.pem"
+key = f"{os.getcwd()}/TLS/key.pem"
 
 arrival_file_mutex = asyncio.Lock()
 departure_file_mutex = asyncio.Lock()
@@ -98,11 +98,13 @@ send_data = asyncio.Event()
 hmi_data_queue = multiprocessing.Queue()
 modbus_data_queue = asyncio.Queue()
 
-app = Flask(__name__, template_folder=os.path.join(os.path.dirname(os.getcwd()), "templates"),
-            static_folder=os.path.join(os.path.dirname(os.getcwd()), "static"))
+app = Flask(__name__, 
+            template_folder=f"{os.getcwd()}/templates",
+            static_folder=f"{os.getcwd()}/static")
+
 app.logger.setLevel(logging.ERROR)
 
-log = logging.getLogger('werkzeug')
+log = logging.getLogger('werkzedug')
 log.setLevel(logging.ERROR)
 
 # Sessions för login
@@ -339,7 +341,7 @@ def logPage():
 
 
 def open_json(json_file):
-    with mutex, open(os.path.join(os.path.dirname(os.getcwd()), "JSONs", json_file), 'r') as dataFile:
+    with mutex, open(f"{os.getcwd()}/JSONs/{json_file}","r") as dataFile:
         json_data = json.load(dataFile)
     return json_data
 
@@ -347,7 +349,7 @@ def open_json(json_file):
 def writeToJson(json_file, data_json):
     data_json = json.dumps(data_json, indent=3)
 
-    with mutex, open(os.path.join(os.path.dirname(os.getcwd()), "JSONs", json_file), 'w') as dataFile:
+    with mutex, open(f"{os.getcwd()}/JSONs/{json_file}","w") as dataFile:
         dataFile.write(data_json)
 
 
@@ -1111,7 +1113,7 @@ async def departure_to_data():
     """Copies departure.json to data.json for the hmi"""
     departure_data = await read_from_file(1)
 
-    with mutex, open(os.path.join(os.path.dirname(os.getcwd()), "JSONs", "data.json"), "r") as datafile:
+    with mutex, open(f"{os.getcwd()}/JSONs/data.json","r") as datafile:
         data = json.load(datafile)
 
     for i in range(1, 7):
@@ -1130,7 +1132,7 @@ async def departure_to_data():
             'track': departure_data[i]['TrackAtLocation']
         })
 
-    with mutex, open(os.path.join(os.path.dirname(os.getcwd()), "JSONs", "data.json"), "w") as datafile:
+    with mutex, open(f"{os.getcwd()}/JSONs/data.json","w") as datafile:
         json.dump(data, datafile, indent=3)
 
 
@@ -1151,7 +1153,7 @@ async def write_to_file(data: Union[dict, List], file_nr: int) -> None:
 
         # Write content to the file
         async with arrival_file_mutex:
-            with open(os.path.join(os.path.dirname(os.getcwd()), "JSONs", "arrival.json"), 'w') as file:
+            with open(f"{os.getcwd()}/JSONs/arrival.json","w") as file:
                 file.write(content)
 
         arrival_file_version += 1
@@ -1165,7 +1167,7 @@ async def write_to_file(data: Union[dict, List], file_nr: int) -> None:
 
         # Write content to the file
         async with departure_file_mutex:
-            with open(os.path.join(os.path.dirname(os.getcwd()), "JSONs", "departure.json"), 'w') as file:
+            with open(f"{os.getcwd()}/JSONs/derparture.json","w") as file:
                 file.write(content)
 
         departure_file_version += 1
@@ -1180,7 +1182,7 @@ async def read_from_file(file_nr: int) -> Union[dict, List]:
     if file_nr == 0:
         try:
             async with arrival_file_mutex:
-                with open(os.path.join(os.path.dirname(os.getcwd()), "JSONs", "arrival.json"), 'r') as file:
+                with open(f"{os.getcwd()}/JSONs/arrival.json","r") as file:
                     content = file.read()
         except (FileNotFoundError, json.JSONDecodeError):
             logging.error("Cannot find or decode file")
@@ -1202,7 +1204,7 @@ async def read_from_file(file_nr: int) -> Union[dict, List]:
     else:
         try:
             async with departure_file_mutex:
-                with open(os.path.join(os.path.dirname(os.getcwd()), "JSONs", "departure.json"), 'r') as file:
+                with open(f"{os.getcwd()}/JSONs/derparture.json","r") as file:
                     content = file.read()
         except (FileNotFoundError, json.JSONDecodeError):
             logging.error("Cannot find or decode file")
@@ -1525,8 +1527,8 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
     # remove old json files
     try:
         logging.info("Removed old files")
-        os.remove(os.path.join(os.path.dirname(os.getcwd()), "JSONs", "departure.json"))
-        os.remove(os.path.join(os.path.dirname(os.getcwd()), "JSONs", "arrival.json"))
+        os.remove(f"{os.getcwd()}/JSONs/derparture.json")
+        os.remove(f"{os.getcwd()}/JSONs/arrival.json")
 
     except FileNotFoundError:
         pass

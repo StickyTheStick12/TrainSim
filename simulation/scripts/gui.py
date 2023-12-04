@@ -19,7 +19,7 @@ from cryptography.hazmat.primitives.asymmetric import dh
 from cryptography.fernet import Fernet
 
 try:
-    os.remove(os.path.join(os.path.dirname(os.getcwd()), "logs", "GUI.log"))
+    os.remove(f"{os.getcwd()}/logs/GUI.log")
 except FileNotFoundError:
     pass
 
@@ -27,7 +27,7 @@ except FileNotFoundError:
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(funcName)s - %(message)s', level=logging.INFO)
 
 # Create a FileHandler to write log messages to a file
-file_handler = logging.FileHandler(os.path.join(os.path.dirname(os.getcwd()), "logs", 'GUI.log'))
+file_handler = logging.FileHandler(f"{os.getcwd()}/logs/GUI.log")
 file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(funcName)s - %(message)s'))
 logging.getLogger().addHandler(file_handler)
 
@@ -78,7 +78,7 @@ class TrainStation(ctk.CTk):
         for c in range(6):
             self.tracks_frame.grid_columnconfigure(c, weight=1)
 
-        self.image = Image.open(os.path.join(os.getcwd(), "train.png"))
+        self.image = Image.open(f"{os.getcwd()}/train.png")
         self.image = self.image.resize((50, 140))
         self.image = ImageTk.PhotoImage(self.image)
 
@@ -135,21 +135,23 @@ class TrainStation(ctk.CTk):
                 track_canvas.create_rectangle(10, y, 90, y + track_width, fill="grey")
 
             # Create switch canvas for each track
-            track_switch_canvas = ctk.CTkCanvas(self.tracks_frame, width=100, height=100, highlightthickness=0,
+            track_switch_canvas = ctk.CTkCanvas(self.tracks_frame, width=100, height=300, highlightthickness=0,
                                                 bg=self["bg"])
             track_switch_canvas.grid(row=3, column=i, pady=10)
             self.track_switch_canvases.append(track_switch_canvas)
 
-    def track_switch(self, track_switch):
+    def track_switch_change(self, track_switch):
         """create a track switch that points at a specific track"""
+        # remove the visuals of the old switch pointer
         old_switch_canvas = self.track_switch_canvases[self.current_switch_location - 1]
         old_switch_canvas.delete("all")
-        track_switch_index = track_switch - 1
-        track_switch_canvas = self.track_switch_canvases[track_switch_index]
-        track_switch_canvas.create_polygon(20, 20, 80, 20, 50, 0, fill="pink")
-        track_switch_canvas.create_line(50, 60, 50, 20, fill="pink", width=5)
-        track_switch_canvas.create_text(50, 70, text="Track switch", font=self.text_font, fill="pink")
+
+        # set current switch location to the given track switch
         self.current_switch_location = track_switch
+        track_switch_index = self.current_switch_location - 1
+        track_switch_canvas = self.track_switch_canvases[track_switch_index]
+        track_switch_canvas.create_polygon(10, 60, 90, 60, 50, 0, fill="grey")
+        track_switch_canvas.create_line(50, 180, 50, 60, fill="grey", width=50)
 
     def create_train(self, track):
         """Creates a train on a given track(1-6) outside the train station"""
@@ -301,7 +303,7 @@ class TrainStation(ctk.CTk):
                     self.add_data_timetable(int(data[1]), [data[3], data[4], data[5]])
                 case "S":
                     # Packet: ["S", "switch_status"]
-                    self.track_switch(int(data[1]))
+                    self.track_switch_change(int(data[1]))
                 case "R":
                     # Packet ["R", "index"]
                     self.move_train_from_station(int(data[1]), 1)

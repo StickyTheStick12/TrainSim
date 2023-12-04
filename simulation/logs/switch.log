@@ -1,0 +1,5 @@
+2023-12-04 10:31:10,499 - INFO - run_client - Started client
+2023-12-04 10:31:10,519 - WARNING - warning - Failed to connect [Errno 111] Connect call failed ('127.0.0.1', 12345)
+2023-12-04 10:31:10,538 - INFO - run_client - Couldn't connect to server, trying again in 5 seconds
+2023-12-04 10:31:15,558 - INFO - run_client - Connected to server
+2023-12-04 10:31:26,266 - ERROR - read_holding_register - Received ModbusException(Modbus Error: [Connection] Not connected[AsyncModbusTlsClient localhost:12345]) from library

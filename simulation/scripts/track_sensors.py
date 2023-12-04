@@ -26,14 +26,14 @@ from cryptography.hazmat.primitives.asymmetric import dh
 from cryptography.fernet import Fernet
 
 try:
-    os.remove(os.path.join(os.path.dirname(os.getcwd()), "logs", "track_sensor.log"))
+    os.remove(f"{os.getcwd()}/logs/track_sensor.log")
 except FileNotFoundError:
     pass
 
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(funcName)s - %(message)s', level=logging.INFO)
 
 # Create a FileHandler to write log messages to a file
-file_handler = logging.FileHandler(os.path.join(os.path.dirname(os.getcwd()), "logs", 'track_sensor.log'))
+file_handler = logging.FileHandler(f"{os.getcwd()}/logs/track_sensor.log")
 file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(funcName)s - %(message)s'))
 logging.getLogger().addHandler(file_handler)
 
@@ -41,8 +41,10 @@ logging.getLogger().addHandler(file_handler)
 datastore_size = 95  # cant be bigger than 125
 modbus_port = 13000
 
-cert = os.path.join(os.path.dirname(os.getcwd()), "TLS", "track_cert.pem")
-key = os.path.join(os.path.dirname(os.getcwd()), "TLS", "track_key.pem")
+cert = f"{os.getcwd()}/TLS/track_cert.pem"
+key = f"{os.getcwd()}/TLS/track_key.pem"
+
+
 
 track_status = [0]*6
 track_updates = [0]*6

@@ -1,0 +1,100 @@
+[
+  {
+    "AdvertisedTime": "2023-12-04 11:16",
+    "EstimatedTime": "2023-12-04 11:16",
+    "TrackAtLocation": "6",
+    "TrainOwner": "JLT",
+    "IsRemoved": false,
+    "id": "1"
+  },
+  {
+    "AdvertisedTime": "2023-12-04 11:12",
+    "EstimatedTime": "2023-12-04 11:18",
+    "TrackAtLocation": "1",
+    "TrainOwner": "\u00d6-T\u00c5G",
+    "IsRemoved": false,
+    "id": "2"
+  },
+  {
+    "AdvertisedTime": "2023-12-04 12:12",
+    "EstimatedTime": "2023-12-04 12:12",
+    "TrackAtLocation": "1",
+    "TrainOwner": "\u00d6-T\u00c5G",
+    "IsRemoved": false,
+    "id": "3"
+  },
+  {
+    "AdvertisedTime": "2023-12-04 12:16",
+    "EstimatedTime": "2023-12-04 12:16",
+    "TrackAtLocation": "6",
+    "TrainOwner": "JLT",
+    "IsRemoved": false,
+    "id": "4"
+  },
+  {
+    "AdvertisedTime": "2023-12-04 13:12",
+    "EstimatedTime": "2023-12-04 13:12",
+    "TrackAtLocation": "1",
+    "TrainOwner": "\u00d6-T\u00c5G",
+    "IsRemoved": false,
+    "id": "5"
+  },
+  {
+    "AdvertisedTime": "2023-12-04 13:16",
+    "EstimatedTime": "2023-12-04 13:16",
+    "TrackAtLocation": "6",
+    "TrainOwner": "JLT",
+    "IsRemoved": false,
+    "id": "6"
+  },
+  {
+    "AdvertisedTime": "2023-12-04 14:12",
+    "EstimatedTime": "2023-12-04 14:12",
+    "TrackAtLocation": "1",
+    "TrainOwner": "\u00d6-T\u00c5G",
+    "IsRemoved": false,
+    "id": "7"
+  },
+  {
+    "AdvertisedTime": "2023-12-04 14:16",
+    "EstimatedTime": "2023-12-04 14:16",
+    "TrackAtLocation": "6",
+    "TrainOwner": "JLT",
+    "IsRemoved": false,
+    "id": "8"
+  },
+  {
+    "AdvertisedTime": "2023-12-04 15:12",
+    "EstimatedTime": "2023-12-04 15:12",
+    "TrackAtLocation": "1",
+    "TrainOwner": "\u00d6-T\u00c5G",
+    "IsRemoved": false,
+    "id": "9"
+  },
+  {
+    "AdvertisedTime": "2023-12-04 15:16",
+    "EstimatedTime": "2023-12-04 15:16",
+    "TrackAtLocation": "6",
+    "TrainOwner": "JLT",
+    "IsRemoved": false,
+    "id": "10"
+  },
+  {
+    "AdvertisedTime": "2023-12-04 16:12",
+    "EstimatedTime": "2023-12-04 16:12",
+    "TrackAtLocation": "1",
+    "TrainOwner": "\u00d6-T\u00c5G",
+    "IsRemoved": false,
+    "id": "11"
+  },
+  {
+    "AdvertisedTime": "2023-12-04 16:16",
+    "EstimatedTime": "2023-12-04 16:16",
+    "TrackAtLocation": "6",
+    "TrainOwner": "JLT",
+    "IsRemoved": false,
+    "id": "12"
+  }
+]
+fileVersion=1
+HMAC=d840f1ae9b7367a454e6e366c9e016bcbf33509c6768eb5c69a4358f9f1f0149

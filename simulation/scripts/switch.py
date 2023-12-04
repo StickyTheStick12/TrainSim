@@ -18,7 +18,7 @@ from cryptography.hazmat.primitives.asymmetric import dh
 from cryptography.fernet import Fernet
 
 try:
-    os.remove(os.path.join(os.path.dirname(os.getcwd()), "logs", "switch.log"))
+    os.remove(f"{os.getcwd()}/logs/switch.log")
 except FileNotFoundError:
     pass
 
@@ -26,15 +26,18 @@ except FileNotFoundError:
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(funcName)s - %(message)s', level=logging.INFO)
 
 # Create a FileHandler to write log messages to a file
-file_handler = logging.FileHandler(os.path.join(os.path.dirname(os.getcwd()), "logs", 'switch.log'))
+file_handler = logging.FileHandler(f"{os.getcwd()}/logs/switch.log")
 file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(funcName)s - %(message)s'))
 logging.getLogger().addHandler(file_handler)
 
 
 # Modbus variables
 datastore_size = 95  # needs to be the same size as the server, max 125 though
-cert = os.path.join(os.path.dirname(os.getcwd()), "TLS", "switch_cert.pem")
-key = os.path.join(os.path.dirname(os.getcwd()), "TLS", "switch_key.pem")
+
+cert = f"{os.getcwd()}/TLS/switch_cert.pem"
+key = f"{os.getcwd()}/TLS/switch_key.pem"
+
+
 host = "localhost"
 port = 12345
 

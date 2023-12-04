@@ -1,0 +1,58 @@
+2023-12-04 10:31:15,913 - INFO - read_data_sim - Received data from simulation
+2023-12-04 10:31:15,914 - INFO - read_data_sim - Received data to train
+2023-12-04 10:31:15,914 - INFO - read_data_sim - N - 2023-12-04 10:42 6 13 ¹4 bb611aede23f4d6ae8b1bcb4e582402c67a55e12bc32b9b63f042b264dce96bb
+2023-12-04 10:31:15,914 - INFO - read_data_sim - 1
+2023-12-04 10:31:15,914 - INFO - read_data_sim - calculating signature for this N - 2023-12-04 10:42 6 131
+2023-12-04 10:31:15,914 - INFO - read_data_sim - [102, 100, 102, 98, 99, 99, 48, 49, 51, 101, 99, 54, 50, 55, 98, 50, 57, 49, 100, 102, 56, 53, 100, 99, 52, 57, 101, 53, 100, 101, 56, 56, 101, 54, 53, 48, 51, 49, 56, 49, 56, 48, 97, 52, 97, 101, 55, 56, 97, 98, 51, 52, 56, 57, 102, 48, 97, 51, 52, 100, 56, 52, 99, 54]
+2023-12-04 10:31:15,914 - INFO - read_data_sim - Verified signature on data, notified train.
+2023-12-04 10:31:15,914 - INFO - handle_data - received data from sim: ['N', '-', '2023-12-04', '10:42', '6', '13']
+2023-12-04 10:31:15,917 - INFO - handle_train - Train has started
+2023-12-04 10:31:15,928 - INFO - handle_track_data - 6 11
+2023-12-04 10:31:15,929 - INFO - handle_track_data - [1, 3, 54, 32, 49, 32, 244, 134, 32, 56, 97, 102, 100, 55, 100, 100, 98, 98, 55, 57, 52, 55, 100, 53, 97, 55, 56, 97, 101, 57, 99, 99, 98, 54, 98, 55, 97, 101, 53, 53, 102, 49, 101, 55, 100, 97, 50, 53, 48, 48, 50, 49, 101, 53, 97, 98, 98, 53, 54, 55, 56, 53, 98, 55, 53, 49, 100, 52, 100, 102, 101, 48, 53]
+2023-12-04 10:31:15,936 - INFO - handle_track_data - [56, 50, 101, 98, 51, 53, 102, 102, 97, 99, 57, 99, 97, 48, 48, 49, 51, 99, 56, 53, 56, 101, 50, 52, 98, 54, 48, 55, 52, 99, 49, 54, 54, 55, 98, 99, 49, 52, 100, 100, 99, 102, 49, 100, 48, 53, 51, 55, 49, 52, 102, 48, 57, 98, 52, 52, 55, 99, 57, 99, 54, 53, 52, 52]
+2023-12-04 10:31:15,954 - INFO - read_data_sim - Received data from simulation
+2023-12-04 10:31:15,955 - INFO - read_data_sim - Received data to train
+2023-12-04 10:31:15,955 - INFO - read_data_sim - N - 2023-12-04 10:47 1 14 Ñá 11f314c3696f87293430f0d50734b4a9901e4da24fe1889a688a7f4f4ebb8392
+2023-12-04 10:31:15,955 - INFO - read_data_sim - 2
+2023-12-04 10:31:15,955 - INFO - read_data_sim - calculating signature for this N - 2023-12-04 10:47 1 142
+2023-12-04 10:31:15,955 - INFO - read_data_sim - [49, 97, 55, 51, 52, 99, 51, 99, 102, 97, 53, 51, 50, 54, 101, 57, 55, 102, 52, 97, 51, 100, 51, 56, 100, 55, 54, 98, 52, 51, 99, 102, 53, 102, 51, 98, 55, 56, 50, 53, 57, 102, 98, 52, 100, 99, 50, 98, 99, 100, 55, 97, 97, 101, 101, 55, 49, 54, 57, 101, 102, 55, 57, 53]
+2023-12-04 10:31:15,955 - INFO - read_data_sim - Verified signature on data, notified train.
+2023-12-04 10:31:15,955 - INFO - handle_data - received data from sim: ['N', '-', '2023-12-04', '10:47', '1', '14']
+2023-12-04 10:31:15,955 - INFO - handle_train - Train has started
+2023-12-04 10:31:15,955 - INFO - handle_track_data - 1 12
+2023-12-04 10:31:15,956 - INFO - handle_track_data - [2, 3, 49, 32, 49, 32, 228, 139, 32, 102, 101, 48, 53, 50, 97, 57, 53, 99, 100, 48, 51, 99, 56, 98, 55, 102, 54, 54, 57, 57, 55, 54, 100, 48, 49, 52, 57, 49, 98, 50, 57, 51, 56, 55, 101, 53, 51, 51, 49, 99, 48, 99, 49, 53, 50, 57, 53, 48, 48, 97, 97, 56, 54, 54, 97, 57, 98, 54, 100, 56, 48, 52, 101]
+2023-12-04 10:31:26,257 - INFO - read_data_sim - Received data from simulation
+2023-12-04 10:31:26,258 - ERROR - default_exception_handler - Task exception was never retrieved
+future: <Task finished name='Task-14' coro=<read_data_sim() done, defined at /home/vboxuser/TrainSim-master_new/simulation/scripts/train.py:398> exception=error('unpack requires a buffer of 8 bytes')>
+Traceback (most recent call last):
+  File "/home/vboxuser/TrainSim-master_new/simulation/scripts/train.py", line 409, in read_data_sim
+    message_type, data_length = struct.unpack('!II', received_header)
+struct.error: unpack requires a buffer of 8 bytes
+2023-12-04 10:32:01,182 - ERROR - default_exception_handler - Task exception was never retrieved
+future: <Task finished name='Task-8' coro=<handle_track_data() done, defined at /home/vboxuser/TrainSim-master_new/simulation/scripts/train.py:115> exception=error('unpack requires a buffer of 256 bytes')>
+Traceback (most recent call last):
+  File "/home/vboxuser/TrainSim-master_new/simulation/scripts/train.py", line 171, in handle_track_data
+    received_signature = list(struct.unpack('!64I', packed_data))
+struct.error: unpack requires a buffer of 256 bytes
+2023-12-04 10:32:02,700 - ERROR - default_exception_handler - Task was destroyed but it is pending!
+task: <Task pending name='Task-3' coro=<handle_train() running at /home/vboxuser/TrainSim-master_new/simulation/scripts/train.py:189> wait_for=<Future pending cb=[Task.task_wakeup()]>>
+2023-12-04 10:32:02,709 - ERROR - default_exception_handler - Task was destroyed but it is pending!
+task: <Task pending name='Task-4' coro=<handle_train() running at /home/vboxuser/TrainSim-master_new/simulation/scripts/train.py:189> wait_for=<Future pending cb=[Task.task_wakeup()]>>
+2023-12-04 10:32:02,713 - ERROR - default_exception_handler - Task was destroyed but it is pending!
+task: <Task pending name='Task-5' coro=<handle_train() running at /home/vboxuser/TrainSim-master_new/simulation/scripts/train.py:189> wait_for=<Future pending cb=[Task.task_wakeup()]>>
+2023-12-04 10:32:02,714 - ERROR - default_exception_handler - Task was destroyed but it is pending!
+task: <Task pending name='Task-6' coro=<handle_train() running at /home/vboxuser/TrainSim-master_new/simulation/scripts/train.py:189> wait_for=<Future pending cb=[Task.task_wakeup()]>>
+2023-12-04 10:32:02,714 - ERROR - default_exception_handler - Task was destroyed but it is pending!
+task: <Task pending name='Task-7' coro=<handle_train() running at /home/vboxuser/TrainSim-master_new/simulation/scripts/train.py:189> wait_for=<Future pending cb=[Task.task_wakeup()]>>
+2023-12-04 10:32:02,747 - ERROR - default_exception_handler - Task was destroyed but it is pending!
+task: <Task pending name='Task-13' coro=<handle_server.<locals>.write_data() running at /home/vboxuser/TrainSim-master_new/simulation/scripts/train.py:569> wait_for=<Future pending cb=[Task.task_wakeup()]>>
+2023-12-04 10:32:02,747 - ERROR - default_exception_handler - Task was destroyed but it is pending!
+task: <Task pending name='Task-15' coro=<Event.wait() running at /usr/lib/python3.10/asyncio/locks.py:214> wait_for=<Future pending cb=[Task.task_wakeup()]> cb=[_release_waiter(<Future pendi...ask_wakeup()]>)() at /usr/lib/python3.10/asyncio/tasks.py:387]>
+2023-12-04 10:32:02,748 - ERROR - default_exception_handler - Task was destroyed but it is pending!
+task: <Task pending name='Task-9' coro=<handle_data() running at /home/vboxuser/TrainSim-master_new/simulation/scripts/train.py:346> wait_for=<Future pending cb=[Task.task_wakeup()]>>
+2023-12-04 10:32:02,748 - ERROR - default_exception_handler - Task was destroyed but it is pending!
+task: <Task pending name='Task-16' coro=<Event.wait() running at /usr/lib/python3.10/asyncio/locks.py:214> wait_for=<Future pending cb=[Task.task_wakeup()]> cb=[_release_waiter(<Future pendi...ask_wakeup()]>)() at /usr/lib/python3.10/asyncio/tasks.py:387]>
+2023-12-04 10:32:02,753 - ERROR - default_exception_handler - Task was destroyed but it is pending!
+task: <Task pending name='Task-1' coro=<handle_train() running at /home/vboxuser/TrainSim-master_new/simulation/scripts/train.py:262> wait_for=<Future pending cb=[Task.task_wakeup()]>>
+2023-12-04 10:32:02,753 - ERROR - default_exception_handler - Task was destroyed but it is pending!
+task: <Task pending name='Task-2' coro=<handle_train() running at /home/vboxuser/TrainSim-master_new/simulation/scripts/train.py:262> wait_for=<Future pending cb=[Task.task_wakeup()]>>
