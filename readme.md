@@ -1,4 +1,3 @@
-![alt text](https://github.com/StickyTheStick12/TrainSim/blob/master/High_level_architecture.png?raw=true)
 
 ## **Appendix**
 
@@ -45,6 +44,7 @@
   
 - [References](#references)
 
+
 ## Introduction - Project Structure
 
 The project is organized into two main directories: `attack` and `simulation`. The `simulation` directory is further divided into several subdirectories:
@@ -66,31 +66,34 @@ The project is organized into two main directories: `attack` and `simulation`. T
 #### 5. **Script Subdirectory**
    - Houses all the necessary scripts required to run the simulation.
   
-#### 6 **JSONs Subdirectory**
-- Contains all the JSON files used by the program. data.json is saved between runs while arrival and departure will be deleted when the simulation first is started.
+#### 6. **JSONs Subdirectory**
+   - Contains all the JSON files used by the program. `data.json` is saved between runs, while `arrival.json` and `departure.json` will be deleted when the simulation first starts.
 
 ## Installation and Execution Guidelines
-
-For quick help please run: (make help)
-
+For quick assistance, use:
 ```bash
-make help 
+make help
 ```
 
-To run the program, start by installing the required dependencies. The simplest way is to use the provided requirements list and execute the following command in the simulation folder:
-
+To run the program, begin by installing the necessary dependencies. You can either utilize the provided requirements list with the following command:
+```bash
+pip install -r requirements.txt
+```
+Alternatively, within the simulation directory, execute:
 ```bash
 make install
 ```
-Once the dependencies are installed, you can use the provided Makefile for convenient program execution. The Makefile supports four different start commands:
+This command will also install `gnome-terminal`.
 
-1. **Single Terminal (make start):**
+Once the dependencies are installed, employ the provided Makefile for streamlined program execution. The Makefile offers four distinct start commands:
+
+1. **Single Terminal (Recommended):**
     ```bash
     make start
     ```
-   - This command runs all scripts in the same terminal.
-   
-2. **gnome-terminal (make gnomestart):**
+   - This command executes all scripts in a single terminal.
+
+2. **Gnome Terminal:**
     ```bash
     make gnomestart
     ```
@@ -98,23 +101,24 @@ Once the dependencies are installed, you can use the provided Makefile for conve
     ```bash
     make
     ```
-   - Initiates the program with a separate Konsole terminal for each script. Ensure you have Konsole installed to utilize this option.
+   - Initiates the program with separate Gnome terminals for each script. Ensure you have Gnome Terminal installed to use this option.
 
-4. **konsole Terminals (make kstart):**
+4. **Konsole Terminals:**
     ```bash
 	make kstart
     ```
-   - Spawns a new Gnome terminal for each script. Note: Gnome terminals are required for this option.
+   - Spawns a new Konsole terminal for each script. Note: Konsole is required for this option.
 
-5. **Xterminals (make xstart):**
+5. **Xterminals:**
     ```bash
     make xstart
     ```
    - Spawns a new Xterminal for each script. Note: Xterminals are required for this option.
 
-Choose the option that best fits your environment and preferences. 
+Select the option that best suits your environment and preferences.
 
-To stop the program, execute either of the following commands:
+To halt the program, execute either of the following commands:
+
 ```bash
 make stop
 ```
@@ -123,7 +127,9 @@ or
 make kill
 ```
 
+
 ## Architecture picture
+![alt text](https://github.com/StickyTheStick12/TrainSim/blob/master/High_level_architecture.png?raw=true)
 
 ## HMI Description
 
