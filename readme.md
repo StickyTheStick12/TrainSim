@@ -299,6 +299,24 @@ In the event of authentication failures during data transmission, the system pri
 **Receiver's Response:**
 - On the receiver side, in case of an authentication failure, the system rejects the incoming data, logs the failure, and awaits the next package. The authentication failure can both be a signature that differs from the received or that the sequence number for the data is lower than the expected.
 
+### Known Limitations
+
+While the simulation strives to represent a realistic train station environment, there are certain limitations that users should be aware of:
+
+1.  **Daytime Operation:**
+
+-   The simulation is optimized for daytime operation, aligning with typical train arrivals and departures. Consequently, the program's functionality may be limited during evenings or extended periods without incoming trains. To ensure continuous operation, it is advisable to initiate the simulation during the day or evening when at least one train is expected to arrive. Additional trains can be added through the HMI interface. The simulation will continue to run until there are no more trains listed in the arrival.json file.
+
+2.  **Maximum Trains:**
+
+-   The simulation currently supports a maximum of seven trains running concurrently. This limitation is imposed by the available number of tracks (six) in the simulated train station and one extra train for the attack scenario. Attempting to add more trains than seven may lead to uninteded behavior and potential simulation issues. The most probable consequence is that the simulation won't be able to create the eight train and may work anyway. Having more than six trains means that there is a pending crash anyway and that the program will exit soon anyways.
+
+3.  **Internet Connection:**
+
+-   Additionally, please note that the simulation requires a consistent internet connection as it periodically queries Trafikverket for train data. This ensures that the simulation stays synchronized with real-world train arrivals and departures. A stable internet connection is essential for the accurate functioning of the program, especially during the scheduled intervals for obtaining updated train information from Trafikverket. If the internet connection is lost, it may lead to potential issues and disrupt the normal operation of the simulation.
+
+It's recommended to consider these limitations when using the simulation and to plan scenarios accordingly.
+
 **References**
     - Citations and references used in the documentation.
 
