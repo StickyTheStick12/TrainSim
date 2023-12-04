@@ -75,13 +75,18 @@ xstart:
 # Target to stop the programs
 stop:
 	@echo "Stopping Program 1"
-	pkill -f gui.py
+	pkill -f train.py
 	@echo "Stopping Program 2"
 	pkill -f hmi.py
 	@echo "Stopping Program 3"
 	pkill -f switch.py
 	@echo "Stopping Program 4"
-	pkill -f Train.py
+	pkill -f gui.py
 	@echo "Stopping Program 5"
 	pkill -f track_sensors.py
 	@echo "Program stopped"
+
+#this assumes your program is not running, this is unfinished
+attack:
+	cd .. && gnome-terminal --title="modbus_attack" -- bash -c "python3 Attack/modbus_attack.py; exec bash" &
+	make all
