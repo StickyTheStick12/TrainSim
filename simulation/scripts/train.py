@@ -32,6 +32,8 @@ sequence_number_track = 0
 update_key_event = asyncio.Event()
 mutex = asyncio.Lock()
 
+train_mutex = asyncio.Lock()
+
 try:
     os.remove(f"{os.getcwd()}/logs/train.log")
 except FileNotFoundError:
