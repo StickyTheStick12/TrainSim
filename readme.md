@@ -34,7 +34,6 @@
 - [Security Considerations](#security-considerations)
   - [Key Rotation for Authentication](#key-rotation-for-authentication)
   - [Secure Communication with Modbus and TCP](#secure-communication-with-modbus-and-tcp)
-  - [TLS Encryption for Modbus](#tls-encryption-for-modbus)
   - [Data Integrity Protection](#data-integrity-protection)
   - [Authentication for Modbus and TCP](#authentication-for-modbus-and-tcp)
     - [Authentication Failure Handling](#authentication-failure-handling)
