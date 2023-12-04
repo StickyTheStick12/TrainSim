@@ -70,10 +70,10 @@ The project is organized into two main directories: `attack` and `simulation`. T
 
 ## Installation and Execution Guidelines
 
-To run the program, start by installing the required dependencies. The simplest way is to use the provided requirements list and execute the following command:
+To run the program, start by installing the required dependencies. The simplest way is to use the provided requirements list and execute the following command in the simulation folder:
 
 ```bash
-pip install -r requirements.txt
+make install
 ```
 Once the dependencies are installed, you can use the provided Makefile for convenient program execution. The Makefile supports four different start commands:
 
@@ -83,9 +83,9 @@ Once the dependencies are installed, you can use the provided Makefile for conve
     ```
    - This command runs all scripts in the same terminal.
    
-2. **Konsole (make kstart):**
+2. **gnome-terminal (make gnomestart):**
     ```bash
-    make kstart
+    make gnomestart
     ```
     or simply:
     ```bash
@@ -93,9 +93,9 @@ Once the dependencies are installed, you can use the provided Makefile for conve
     ```
    - Initiates the program with a separate Konsole terminal for each script. Ensure you have Konsole installed to utilize this option.
 
-4. **Gnome Terminals (make gnomestart):**
+4. **konsole Terminals (make kstart):**
     ```bash
-	make gnomestart
+	make kstart
     ```
    - Spawns a new Gnome terminal for each script. Note: Gnome terminals are required for this option.
 
