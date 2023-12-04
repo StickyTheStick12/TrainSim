@@ -38,9 +38,9 @@
   - [Authentication for Modbus and TCP](#authentication-for-modbus-and-tcp)
     - [Authentication Failure Handling](#authentication-failure-handling)
 - [Known Limitations](#known-limitations)
-  - [Daytime Operation](#daytime-operation)
-  - [Maximum Trains](#maximum-trains)
-  - [Internet Connection](#internet-connection)
+  - [Daytime Operation](#1-daytime-operation)
+  - [Maximum Trains](#2-maximum-trains)
+  - [Internet Connection](#3-internet-connection)
   
 - [References](#references)
 
