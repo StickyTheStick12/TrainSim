@@ -91,7 +91,7 @@ Once the dependencies are installed, employ the provided Makefile for streamline
     ```bash
     make start
     ```
-   - This command executes all scripts in a single terminal.
+- This command executes all scripts in a single terminal. It's the recommended way to run the program. Please note that all eventual error messages will be redirected to the same terminal but can be found in each script's individual log in the `logs` directory.
 
 2. **Gnome Terminal:**
     ```bash
@@ -101,7 +101,7 @@ Once the dependencies are installed, employ the provided Makefile for streamline
     ```bash
     make
     ```
-   - Initiates the program with separate Gnome terminals for each script. Ensure you have Gnome Terminal installed to use this option.
+   - Initiates the program with separate Gnome terminals for each script. Ensure you have Gnome Terminal installed to use this option. 
 
 4. **Konsole Terminals:**
     ```bash
@@ -127,6 +127,7 @@ or
 make kill
 ```
 
+Please note that the simulation doesn't support verbose mode by default. Instead, it is up to the user to change the logging level in each script to something lower. The default is set for error and is the recommended level.
 
 ## Architecture picture
 ![alt text](https://github.com/StickyTheStick12/TrainSim/blob/master/High_level_architecture.png?raw=true)
