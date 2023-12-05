@@ -17,8 +17,6 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import dh
 from cryptography.fernet import Fernet
 
-# TODO: fix rotation
-
 secret_key_sim = b''
 sequence_number_sim = 0
 data_queue = asyncio.Queue()
@@ -30,10 +28,10 @@ MESSAGE_TYPE_SIGNATURE = 3
 track_queue = asyncio.Queue()
 track_key = b""
 sequence_number_track = 0
-update_key_event = asyncio.Event()
 mutex = asyncio.Lock()
 
 train_mutex = asyncio.Lock()
+sim_mutex = asyncio.Lock()
 
 try:
     os.remove(f"{os.getcwd()}/logs/train.log")
@@ -150,7 +148,74 @@ async def handle_track_data() -> None:
 
                 if sequence_number_track == 100:
                     logging.info("Updating secret key")
-                    update_key_event.set()
+
+                    new_key = Fernet.generate_key()
+                    cipher = Fernet(track_key)
+                    encrypted_message = cipher.encrypt(new_key)
+
+                    if rotation == 3:
+                        writer_track.write("D".encode())
+                        await writer_track.drain()
+
+                        p = 0xFFFFFFFFFFFFFFFFC90FDAA22168C234C4C6628B80DC1CD129024E088A67CC74020BBEA63B139B22514A08798E3404DDEF9519B3CD3A431B302B0A6DF25F14374FE1356D6D51C245E485B576625E7EC6F44C42E9A637ED6B0BFF5CB6F406B7EDEE386BFB5A899FA5AE9F24117C4B1FE649286651ECE45B3DC2007CB8A163BF0598DA48361C55D39A69163FA8FD24CF5F83655D23DCA3AD961C62F356208552BB9ED529077096966D670C354E4ABC9804F1746C08CA18217C32905E462E36CE3BE39E772C180E86039B2783A2EC07A28FB5C55DF06F4C52C9DE2BCBF6955817183995497CEA956AE515D2261898FA051015728E5A8AACAA68FFFFFFFFFFFFFFFF
+                        g = 2
+
+                        params_numbers = dh.DHParameterNumbers(p, g)
+                        parameters = params_numbers.parameters(default_backend())
+
+                        private_key = parameters.generate_private_key()
+                        public_key = private_key.public_key()
+
+                        public_key_bytes = public_key.public_bytes(
+                            encoding=serialization.Encoding.PEM,
+                            format=serialization.PublicFormat.SubjectPublicKeyInfo
+                        )
+
+                        writer_track.write(public_key_bytes)
+                        await writer_track.drain()
+
+                        public_key_bytes = await data_queue.get()
+
+                        writer_track.write(new_key)
+                        await writer_track.drain()
+
+                        secret = await choose_characters(new_key)
+
+                        received_public_key = serialization.load_pem_public_key(public_key_bytes,
+                                                                                backend=default_backend())
+
+                        shared_secret = private_key.exchange(received_public_key)
+
+                        shared_secret += secret.encode()
+
+                        # Derive a key from the shared secret using a key derivation function (KDF)
+                        derived_key = HKDF(
+                            algorithm=hashes.SHA256(),
+                            length=32,
+                            salt=None,
+                            info=b'handshake data',
+                        ).derive(shared_secret)
+
+                        track_key = base64.urlsafe_b64encode(derived_key)
+                        expected_signature = hmac.new(track_key, new_key, hashlib.sha256)
+
+                        recv_signature = await data_queue.get()
+
+                        if not expected_signature.hexdigest() == recv_signature.hex():
+                            logging.critical("MITM detected")
+                            raise RuntimeError
+
+                        rotation = 0
+                    else:
+                        writer_track.write("K".encode())
+                        await writer_track.drain()
+
+                        writer_track.write(encrypted_message)
+                        await writer_track.drain()
+
+                        track_key = new_key
+
+                        rotation += 1
 
                 data_to_send = ([sequence_number_track] + [len(data)] + [ord(char) for char in data] + [32] + nonce +
                                 [32] + [ord(char) for char in temp_signature])
@@ -265,6 +330,14 @@ async def handle_train(idx: int) -> None:
             await asyncio.wait_for(this_train[4].wait(), timeout=max(0, difference.total_seconds() - 2 * 60))
             this_train[4].clear()
             logging.info("Received a wakeup call")
+
+            msg = [
+                this_train[5],
+                "0"
+            ]
+            await track_queue.put(msg)
+
+            trains[idx][0].clear()
             continue
         except asyncio.TimeoutError:
             logging.info("Timeout error")
@@ -286,8 +359,13 @@ async def handle_train(idx: int) -> None:
             this_train[4].clear()
             logging.info("Wakeup event has been set. Return switch")
             await send_queue.put(["Give up switch message"])
+            msg = [
+                this_train[5],
+                "0"
+            ]
+            await track_queue.put(msg)
             trains[idx][0].clear()
-            return
+            continue
 
         updated_departure = this_train[2]
 
@@ -296,19 +374,18 @@ async def handle_train(idx: int) -> None:
             logging.info("Train is planned to depart at the estimated time")
             await asyncio.sleep(max(0, difference - 20))
 
-            if this_train[4].is_set():
-                this_train[4].clear()
-                logging.info("Wakeup event has been set. Return switch")
-                await send_queue.put(["Give up switch message"])
-                trains[idx][0].clear()
-                return
-
         try:
             await asyncio.wait_for(this_train[4].wait(), timeout=20)
             this_train[4].clear()
             await send_queue.put(["I want to return the switch"])
             logging.info("Received a wakeup call")
-            return
+            msg = [
+                this_train[5],
+                "0"
+            ]
+            await track_queue.put(msg)
+            trains[idx][0].clear()
+            continue
         except asyncio.TimeoutError:
             logging.info("Timeout error")
             pass
@@ -327,12 +404,10 @@ async def handle_train(idx: int) -> None:
             this_train[5],
             "0"
         ]
-
         await track_queue.put(msg)
 
         # clear when we depart or it is deleted
         trains[idx][0].clear()
-
 
 
 async def handle_data() -> None:
@@ -484,60 +559,60 @@ async def read_data_sim(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
 
                 await recv_queue.put(data)
             else:
-                data = data[2:-1]
+                async with sim_mutex:
+                    data = data[2:-1]
+                    if data[0] == "D":
+                        logging.info("Received diffie hellman update wish")
+                        p = 0xFFFFFFFFFFFFFFFFC90FDAA22168C234C4C6628B80DC1CD129024E088A67CC74020BBEA63B139B22514A08798E3404DDEF9519B3CD3A431B302B0A6DF25F14374FE1356D6D51C245E485B576625E7EC6F44C42E9A637ED6B0BFF5CB6F406B7EDEE386BFB5A899FA5AE9F24117C4B1FE649286651ECE45B3DC2007CB8A163BF0598DA48361C55D39A69163FA8FD24CF5F83655D23DCA3AD961C62F356208552BB9ED529077096966D670C354E4ABC9804F1746C08CA18217C32905E462E36CE3BE39E772C180E86039B2783A2EC07A28FB5C55DF06F4C52C9DE2BCBF6955817183995497CEA956AE515D2261898FA051015728E5A8AACAA68FFFFFFFFFFFFFFFF
+                        g = 2
 
-                if data[0] == "D":
-                    logging.info("Received diffie hellman update wish")
-                    p = 0xFFFFFFFFFFFFFFFFC90FDAA22168C234C4C6628B80DC1CD129024E088A67CC74020BBEA63B139B22514A08798E3404DDEF9519B3CD3A431B302B0A6DF25F14374FE1356D6D51C245E485B576625E7EC6F44C42E9A637ED6B0BFF5CB6F406B7EDEE386BFB5A899FA5AE9F24117C4B1FE649286651ECE45B3DC2007CB8A163BF0598DA48361C55D39A69163FA8FD24CF5F83655D23DCA3AD961C62F356208552BB9ED529077096966D670C354E4ABC9804F1746C08CA18217C32905E462E36CE3BE39E772C180E86039B2783A2EC07A28FB5C55DF06F4C52C9DE2BCBF6955817183995497CEA956AE515D2261898FA051015728E5A8AACAA68FFFFFFFFFFFFFFFF
-                    g = 2
+                        params_numbers = dh.DHParameterNumbers(p, g)
+                        parameters = params_numbers.parameters(default_backend())
 
-                    params_numbers = dh.DHParameterNumbers(p, g)
-                    parameters = params_numbers.parameters(default_backend())
+                        private_key = parameters.generate_private_key()
+                        public_key = private_key.public_key()
 
-                    private_key = parameters.generate_private_key()
-                    public_key = private_key.public_key()
+                        public_key_bytes = public_key.public_bytes(
+                            encoding=serialization.Encoding.PEM,
+                            format=serialization.PublicFormat.SubjectPublicKeyInfo
+                        )
 
-                    public_key_bytes = public_key.public_bytes(
-                        encoding=serialization.Encoding.PEM,
-                        format=serialization.PublicFormat.SubjectPublicKeyInfo
-                    )
+                        server_public_key = await reader.read(2048)
+                        writer.write(public_key_bytes)
+                        await writer.drain()
 
-                    server_public_key = await reader.read(2048)
-                    writer.write(public_key_bytes)
-                    await writer.drain()
+                        test = await reader.read(1024)
 
-                    test = await reader.read(1024)
+                        secret = await choose_characters(test)
 
-                    secret = await choose_characters(test)
+                        server_public_key = serialization.load_pem_public_key(server_public_key,
+                                                                              backend=default_backend())
 
-                    server_public_key = serialization.load_pem_public_key(server_public_key,
-                                                                          backend=default_backend())
+                        shared_secret = private_key.exchange(server_public_key)
 
-                    shared_secret = private_key.exchange(server_public_key)
+                        shared_secret += secret.encode()
 
-                    shared_secret += secret.encode()
+                        derived_key = HKDF(
+                            algorithm=hashes.SHA256(),
+                            length=32,
+                            salt=None,
+                            info=b'handshake data',
+                        ).derive(shared_secret)
 
-                    derived_key = HKDF(
-                        algorithm=hashes.SHA256(),
-                        length=32,
-                        salt=None,
-                        info=b'handshake data',
-                    ).derive(shared_secret)
+                        secret_key_sim = base64.urlsafe_b64encode(derived_key)
 
-                    secret_key = base64.urlsafe_b64encode(derived_key)
+                        signature = hmac.new(secret_key_sim, test, hashlib.sha256).hexdigest()
 
-                    signature = hmac.new(secret_key, test, hashlib.sha256).hexdigest()
+                        writer.write(signature.encode())
+                        await writer.drain()
+                    else:
+                        logging.info("Received wish for ordinary key rotation")
+                        data = await reader.read(1024)
+                        cipher = Fernet(secret_key_sim)
+                        secret_key_sim = cipher.decrypt(data)
 
-                    writer.write(signature.encode())
-                    await writer.drain()
-                else:
-                    logging.info("Received wish for ordinary key rotation")
-                    data = await reader.read(1024)
-                    cipher = Fernet(secret_key_sim)
-                    secret_key = cipher.decrypt(data)
-
-                logging.info("Updated secret key")
-                sequence_number_sim = 0
+                    logging.info("Updated secret key")
+                    sequence_number_sim = 0
 
 
 async def handle_server() -> None:
@@ -590,51 +665,48 @@ async def handle_server() -> None:
 
             client_verified = False
 
-            while not client_verified:
-                sequence_number_sim += 1
-                temp_signature = data + str(sequence_number_sim)
-                logging.info(temp_signature)
-                temp_signature = hmac.new(secret_key_sim, temp_signature.encode(), hashlib.sha256).hexdigest()
-                while True:
-                    # Generate 2 bytes
-                    nonce = [char for char in secrets.token_bytes(2)]
+            async with sim_mutex:
+                while not client_verified:
+                    sequence_number_sim += 1
+                    temp_signature = data + str(sequence_number_sim)
+                    logging.info(temp_signature)
+                    temp_signature = hmac.new(secret_key_sim, temp_signature.encode(), hashlib.sha256).hexdigest()
+                    while True:
+                        # Generate 2 bytes
+                        nonce = [char for char in secrets.token_bytes(2)]
 
-                    # Check if any character is a space
-                    if b' ' not in nonce:
-                        break
+                        # Check if any character is a space
+                        if b' ' not in nonce:
+                            break
 
-                if sequence_number_sim == 100:
-                    logging.info("Updating secret key")
-                    # await update_keys(gui_key, 1)
+                    data_to_send = ([sequence_number_sim] + [len(data)] + [ord(char) for char in data] + [32] + nonce +
+                                    [32] + [ord(char) for char in temp_signature])
 
-                data_to_send = ([sequence_number_sim] + [len(data)] + [ord(char) for char in data] + [32] + nonce +
-                                [32] + [ord(char) for char in temp_signature])
+                    logging.info(data_to_send)
 
-                logging.info(data_to_send)
+                    logging.debug("Sending data")
+                    packed_data = str(data_to_send)
+                    combined_data_packed_data = "1" + packed_data
+                    logging.info(combined_data_packed_data)
+                    async with train_mutex:
+                        writer.write(combined_data_packed_data.encode())
+                        await writer.drain()
 
-                logging.debug("Sending data")
-                packed_data = str(data_to_send)
-                combined_data_packed_data = "1" + packed_data
-                logging.info(combined_data_packed_data)
-                async with train_mutex:
-                    writer.write(combined_data_packed_data.encode())
-                    await writer.drain()
+                    expected_signature = [ord(char) for char in
+                                          hmac.new(secret_key_sim, str(nonce).encode(), hashlib.sha256).hexdigest()]
 
-                expected_signature = [ord(char) for char in
-                                      hmac.new(secret_key_sim, str(nonce).encode(), hashlib.sha256).hexdigest()]
+                    logging.debug(f"nonce {str(nonce)}")
+                    logging.debug(f"Expecting: {expected_signature}")
 
-                logging.debug(f"nonce {str(nonce)}")
-                logging.debug(f"Expecting: {expected_signature}")
+                    received_signature = await recv_queue.get()
 
-                received_signature = await recv_queue.get()
+                    logging.info(received_signature)
 
-                logging.info(received_signature)
-
-                if received_signature == expected_signature:
-                    logging.info("Client is verified")
-                    client_verified = True
-                else:
-                    logging.critical("Found wrong signature in holding register")
+                    if received_signature == expected_signature:
+                        logging.info("Client is verified")
+                        client_verified = True
+                    else:
+                        logging.critical("Found wrong signature in holding register")
 
     server = await asyncio.start_server(write_data, "localhost", 15000)
     async with server:
