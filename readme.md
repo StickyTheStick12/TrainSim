@@ -262,44 +262,33 @@ The simulation employs various communication protocols to facilitate interaction
  - **Authentication:** HMAC with prior secret.
 - **Description:** Modbus communication for sending and receiving data from the SCADA server.
 
+
 ## Description of Normal Operation
 
-
-### Adding a Train (Quick Overview):
-
-1.  **Screenshot:**
-
-    -   Capture a snapshot of the streamlined process for adding a train.
-2.  **Explanation:**
-    
-    -   Adding a train is a straightforward process accessed through the HMI's timetable page. Users input a desired departure time, restricted to a maximum of 24 hours into the future. Track selection is flexible, allowing users to choose any available track.
-    -   The simulation seamlessly handles the creation of the train, managing all necessary details behind the scenes.
-
-This quick overview provides a snapshot of the essential steps involved in adding a train to the simulation. For a more detailed understanding of the underlying mechanics, refer to the "Adding a Train (In-Depth Explanation)" section below.
-
-
-### Train Arrival (Quick Overview):
+### Adding trains & train arrivals:
 
 1.  **Screenshot:**
-    
-    -   Provide a visual representation capturing a train's arrival moment.
-2.  **Explanation:**
-    
-    -   The arrival process involves the train requesting and waiting for the switch just before reaching its destination. Delays may occur if the switch is not promptly received. Once the switch is secured, the train proceeds to notify the track sensors of its arrival. The arrival is also viewed in the GUI.
 
-This concise overview offers a glimpse into the key steps of a train's arrival in the simulation. For a more comprehensive understanding of the intricacies behind train arrivals, refer to the "Train Arrival (In-Depth Explanation)" section below
+  -   Capture a snapshot of the streamlined process for adding a train.
+2.  **Process Overview:**
+   -   Adding a train is a straightforward process accessed through the HMI's timetable page. Users input a desired departure time, restricted to a maximum of 24 hours into the future. The simulation dynamically calculates both the arrival and actual departure times.
+   -  Track selection offers flexibility, with users choosing from any of the 6 available tracks. The train name, serving as an identifier on the timetable GUI, can be customized at the user's discretion.
+    -   Behind the scenes, the simulation seamlessly manages the creation of the train, handling all necessary details effortlessly.
+   3. **Track Availability Check:**
+  -   Two minutes prior to a train's scheduled arrival, the simulation checks the availability of the chosen track. If the track is occupied, the simulation intelligently seeks an alternative available track. In the event of no available tracks, the train patiently waits until a track becomes free.
+-   The simulation then communicates essential data to an available train, enabling it to operate autonomously.
+4.  **Train Arrival Process:**
+- Upon receiving data from the simulation, the train initiates the process by requesting the switch. It patiently awaits the simulation's green light before commencing its arrival animation.
 
-### Departure Process (Quick Overview):
+### Removing trains & train departures:
 
 1.  **Screenshot:**
     
     -   Feature a screenshot capturing a train's departure phase.
-2.  **Explanation:**
-    
-    -   The departure process mirrors the arrival procedure. The train initiates a switch request, waits for confirmation, and then notifies both the track sensors and the GUI. This ensures a smooth departure experience, including the display of the departure animation.
-
-This succinct overview provides a snapshot of the key stages in a train's departure within the simulation. For a more detailed exploration of the departure process, consult the "Departure Process (In-Depth Explanation)" section below.
-
+2.  **Process Overview:**
+-   Removing a train mirrors the simplicity of adding one. To remove a train, users need only choose the ID displayed on the website.
+-   When a train is ready to depart, it follows a familiar process of requesting the switch and awaiting a green light from the simulation. The train then smoothly transitions into its departure animation.
+-   Both train removal and departure share the same function. The simulation initially checks whether the train has arrived. If it hasn't, indicative of removal scenarios, the entry in the timetable is promptly deleted. In the case of an arrived train, the same deletion process occurs, accompanied by the initiation of the train's departure animation.
 
 ### Continuous Operation (Quick Overview):
 
@@ -308,36 +297,17 @@ This succinct overview provides a snapshot of the key stages in a train's depart
     -   Showcase a screenshot capturing the system's continuous operation.
     
 2.  **Explanation:**
-    - The simulation is designed for autonomous operation, seamlessly generating trains based on data received from Trafikverket. It operates continuously without requiring manual intervention through the HMI. The system autonomously handles train creation, switch requests, and the entire arrival and departure process.
-
-This concise overview provides a glimpse into the ongoing functionality of the simulation. For a more comprehensive understanding of continuous operation, refer to the "Continuous Operation (In-Depth Explanation)" section below.
-
-### Additional Insights:
-#### Train Arrival (Detailed Overview):
-##### Time Matching Algorithm:
-The departure time entered in the HMI is essentially a wish. To optimize the arrival time, the simulation employs a matching algorithm. It strives to position the train at the station approximately 10 minutes before the specified departure. This involves considering factors such as other trains arrival and departure times and accounting for the availability of the switch. The algorithm calculates the best arrival and departure times, ensuring the train arrives at the best possible time.
-
-##### Track Availability Management:
-Two minutes before the arrival time, the simulation will check the requested track's avaialbility. If the chosen track is occupied, the simulation explores alternative tracks. In the absence of available tracks, the simulation extrapolates a feasible time based on current departures and updates the GUI accordingly. The simulation then waits until a track becomes available before spawning the train.
-
-##### Train Arrival Process:
-Upon spawning, a train immediately requests the switch, anticipating receipt two minutes before arrival or departure, allowing for timely decisions. The train holds the switch for three minutes or relinquishes it early if needed. After securing the switch, the train proceeds based on its schedule—either waiting for arrival or expediting if delayed. When the train wants to arrive the simulation queries the switch for its status, determining the assigned track, and relays this information to the train. Subsequently, the simulation notifies the GUI to commence the arrival animation, and the train informs the respective sensor of its arrival.
-
-
-#### Train Departure (Detailed Overview):
-When a train is set to depart, several processes unfold to ensure a smooth departure:
-##### Train Departure Time Update:
-The departure time of a train undergoes multiple updates due to various factors. Initially, the first departure time update occurs during the arrival process, as mentioned earlier. If the designated track is unavailable, the departure time is adjusted to a later slot. Once the track becomes available, a second update is triggered to align the departure time with the new schedule. This dynamic process allows for potential variations in departure times, accommodating both earlier and later departures.
-
-After the train's creation, no further updates to the departure time are expected. It is assumed that significant delays are unlikely to occur post-creation. However, similar to the arrival process, the train requests the switch 2 minutes before departure. The SCADA server assesses the switch acquisition time and the queue of waiting trains, updating the GUI's departure time accordingly. Upon obtaining the switch, the SCADA server grants a green light to the train, signaling its permission to depart. A status query to the switch follows, checking for potential derailments (not visually displayed in the simulation but logged in hmi.log). The train then notifies the track sensor of its departure from the station.
+The simulation is meticulously crafted for uninterrupted, autonomous operation. It dynamically generates trains based on real-time data from Trafikverket, ensuring a continuous flow of train activities. The system operates seamlessly without the need for manual intervention through the HMI. From train creation to switch requests, and through the entire arrival and departure process, the system adeptly manages the railway operations.
 
 #### Additional Insights:
 ##### Time scheduling
-##### Track availability Management
-##### Switch acqusition
+The departure time that is inserted into the the HMI will be treated as a wish as stated prior. What the simulation does when it is creating a train is that it first will try to find the arrival time. The simulation will take the departure time and subtract 10 minutes as the base case. If there are other trains that need the switch at this time the simulation will start adding time to the arrival until it finds a time where the switch will be available for this train. This helps minimizing the time a train needs to wait for the switch and helps prevent some issues. Once the arrival time is set, the simulation seeks a departure time, ideally 5 minutes post-arrival. While it prefers a departure close to 10 minutes, any time greater than 10 minutes is accepted. This means that the departure for some inputted trains can be 5 minutes after arrival while some trains can wait 20-30 minutes before being allowed to leave.
+##### Updates to departure time and switch acqusition
+Several factors prompt departure time updates. If no track is available, the simulation intelligently guesses based on existing departures, updating the train's departure time accordingly. When a track becomes available, the departure time resets to the current time plus 10 minutes.  The simulation won't set a departure time that is earlier than the departure time it had when it was created, meaning a train can't depart earlier than the advertised time, only later. The switch is time based as stated earlier. When a train wants to depart the simulation will calculate the aproximate time the switch will become available and update the departure time accordingly.
 ##### Sensor communications
-##### Update to departure time
+Upon arrival or departure, trains communicate their track status to track sensors, enabling real-time registration. Track sensors actively relay status to the SCADA server, which polls for status updates every 10 seconds. The server utilizes a local cache for efficient status management instead of actively querying the sensors during arrivals.
 ##### Updating times from Trafikverket
+As the system integrates real-time data from Trafikverket, deleting data poses challenges. Instead of removing trains, the system marks them for deletion. During subsequent queries to Trafikverket, it cross-references the marked data with new data. If absent, the system removes them; otherwise, it retains them for future considerations. This approach maintains consistency in data handling and prevents unexpected inconsistencies.
 
 ## Description of the Attack Scenario and Steps to Reproduce the Attack
 The attack relies on the assumption that the attacker possesses knowledge of how the packages are constructed. It is essential to know the Modbus register size, given the utilization of a flag bit to indicate when a write operation has occurred. Furthermore, the understanding of the data's meaning, the application of HMAC-SHA256, and the existence of a 2-byte nonce within the packet must also be known.
