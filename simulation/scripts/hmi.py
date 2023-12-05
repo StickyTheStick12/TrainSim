@@ -11,8 +11,6 @@ import bcrypt
 # track_sensor tcp for trains listening on port 13007
 # train tcp listening on port 15000
 
-# TODO: fix so we have key rotation for train
-
 import bisect
 import json
 from datetime import datetime, timedelta
@@ -55,7 +53,7 @@ except FileNotFoundError:
     pass
 
 # Configure the logger
-logging.basicConfig(format='%(asctime)s - %(levelname)s - %(funcName)s - %(message)s', level=logging.INFO)
+logging.basicConfig(format='%(asctime)s - %(levelname)s - %(funcName)s - %(message)s', level=logging.ERROR)
 
 # Create a FileHandler to write log messages to a file
 file_handler = logging.FileHandler(f"{os.getcwd()}/logs/HMI.log")
@@ -395,6 +393,7 @@ async def communication_with_trains() -> None:
     global sequence_number_train
     global train_key
     data_queue = asyncio.Queue()
+    rotation = 0
 
     loop = asyncio.get_event_loop()
 
@@ -438,7 +437,76 @@ async def communication_with_trains() -> None:
 
             if sequence_number_train == 100:
                 logging.info("Updating secret key")
-                # await update_keys(gui_key, 1)
+
+                new_key = Fernet.generate_key()
+                cipher = Fernet(train_key)
+                encrypted_message = cipher.encrypt(new_key)
+
+                if rotation == 3:
+                    msg = ":>D"
+
+                    writer_train.write(msg.encode())
+                    await writer_train.drain()
+
+                    p = 0xFFFFFFFFFFFFFFFFC90FDAA22168C234C4C6628B80DC1CD129024E088A67CC74020BBEA63B139B22514A08798E3404DDEF9519B3CD3A431B302B0A6DF25F14374FE1356D6D51C245E485B576625E7EC6F44C42E9A637ED6B0BFF5CB6F406B7EDEE386BFB5A899FA5AE9F24117C4B1FE649286651ECE45B3DC2007CB8A163BF0598DA48361C55D39A69163FA8FD24CF5F83655D23DCA3AD961C62F356208552BB9ED529077096966D670C354E4ABC9804F1746C08CA18217C32905E462E36CE3BE39E772C180E86039B2783A2EC07A28FB5C55DF06F4C52C9DE2BCBF6955817183995497CEA956AE515D2261898FA051015728E5A8AACAA68FFFFFFFFFFFFFFFF
+                    g = 2
+
+                    params_numbers = dh.DHParameterNumbers(p, g)
+                    parameters = params_numbers.parameters(default_backend())
+
+                    private_key = parameters.generate_private_key()
+                    public_key = private_key.public_key()
+
+                    public_key_bytes = public_key.public_bytes(
+                        encoding=serialization.Encoding.PEM,
+                        format=serialization.PublicFormat.SubjectPublicKeyInfo
+                    )
+
+                    writer_train.write(public_key_bytes)
+                    await writer_train.drain()
+
+                    public_key_bytes = await data_queue.get()
+
+                    writer_train.write(new_key)
+                    await writer_train.drain()
+
+                    secret = choose_characters(new_key)
+
+                    received_public_key = serialization.load_pem_public_key(public_key_bytes, backend=default_backend())
+
+                    shared_secret = private_key.exchange(received_public_key)
+
+                    shared_secret += secret.encode()
+
+                    # Derive a key from the shared secret using a key derivation function (KDF)
+                    derived_key = HKDF(
+                        algorithm=hashes.SHA256(),
+                        length=32,
+                        salt=None,
+                        info=b'handshake data',
+                    ).derive(shared_secret)
+
+                    train_key = base64.urlsafe_b64encode(derived_key)
+                    expected_signature = hmac.new(train_key, new_key, hashlib.sha256)
+
+                    recv_signature = await data_queue.get()
+
+                    if not expected_signature.hexdigest() == recv_signature.hex():
+                        logging.critical("MITM detected")
+                        raise RuntimeError
+
+                    rotation = 0
+                else:
+                    msg = ":>K"
+                    writer_train.write(msg.encode())
+                    await writer_train.drain()
+
+                    writer_train.write(encrypted_message)
+                    await writer_train.drain()
+
+                    train_key = new_key
+
+                    rotation += 1
 
             data_to_send = ([sequence_number_train] + [len(data)] + [ord(char) for char in data] + [32] + nonce +
                             [32] + [ord(char) for char in temp_signature])
@@ -462,11 +530,6 @@ async def communication_with_trains() -> None:
             # logging.info(f"Expecting: {expected_signature}")
 
             received_signature = await data_queue.get()
-
-            logging.info(f"recv sig: {received_signature}")
-            logging.info(f"type sig: {str(type(received_signature))}")
-            logging.info(f"recv sig: {expected_signature}")
-            logging.info(f"type sig: {str(type(expected_signature))}")
 
             if str(received_signature) == str(expected_signature):
                 logging.info("Client is verified")
@@ -1474,6 +1537,8 @@ async def sensor_comm() -> None:
                 received_data = "".join(chr(char) for char in hold_register.registers[2:2 + amount_to_read + 1
                                                                                         + 2 + 1 + 64])
 
+                logging.info(received_data)
+
                 nonce = received_data[1 + amount_to_read:1 + amount_to_read + 2]
                 signature = received_data[1 + amount_to_read + 3:]
                 data = received_data[:amount_to_read].split(" ")
@@ -1491,12 +1556,14 @@ async def sensor_comm() -> None:
                 if signature == calc_signature:
                     logging.info("Verified signature on data. Checking received status")
 
-                    if int(data) == 0:
+                    if data == ['0']:
+                        logging.info("Cleared track")
                         track_semaphore.release()
-                        await modbus_data_queue.put(["T", str(i), "A"])
+                        await modbus_data_queue.put(["T", str(i+1), "A"])
                         track_status[i] = 0
                     else:
-                        await modbus_data_queue.put(["T", str(i), "O"])
+                        logging.info("Occupied track")
+                        await modbus_data_queue.put(["T", str(i+1), "O"])
                         track_status[i] = 1
 
                     nonce = [ord(char) for char in nonce]
@@ -1505,6 +1572,7 @@ async def sensor_comm() -> None:
                     calc_signature = [ord(char) for char in calc_signature]
 
                     await sensor_clients[i].write_registers(0x00, calc_signature, slave=1)
+                    await sensor_clients[i].write_register(datastore_size - 2, 0, slave=1)
                 else:
                     logging.critical("Wrong signature found in modbus register")
             else:
@@ -1590,6 +1658,7 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
             ]
 
             await train_queue.put(train_data)
+            created_trains.append(str(max_arrival_id))
         else:
             if success:
                 break
@@ -1747,11 +1816,11 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                 switch_status, sequence_number_switch = await get_switch_status(context, switch_key,
                                                                                 sequence_number_switch)
 
-                if switch_status != data[1]:
+                if int(switch_status) != int(data[1]):
                     logging.info("Updating track in json, due to switch status being different to expected track")
-                    await modbus_data_queue.put(["u", data[2], str(switch_status)])
+                    await modbus_data_queue.put(["u", data[2], switch_status])
 
-                await modbus_data_queue.put(["S", str(switch_status)])
+                await modbus_data_queue.put(["S", switch_status])
 
                 msg = [
                     "T",
@@ -1826,6 +1895,7 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
 
                             for j in range(len(created_trains)):
                                 if data[2] == created_trains[j]:
+                                    logging.info("Found created train")
                                     msg = [
                                         "R",
                                         train['id']
@@ -1862,8 +1932,12 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                             if switch_status != data[1]:
                                 logging.error("The train derailed when it tried to leave the station")
 
+                            logging.info(created_trains)
+                            logging.info(data[2])
+
                             for i in range(len(created_trains)):
                                 if data[2] == created_trains[i]:
+                                    logging.info("Found created train")
                                     msg = [
                                         "R",
                                         train['id']
