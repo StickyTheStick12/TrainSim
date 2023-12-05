@@ -30,7 +30,7 @@ try:
 except FileNotFoundError:
     pass
 
-logging.basicConfig(format='%(asctime)s - %(levelname)s - %(funcName)s - %(message)s', level=logging.INFO)
+logging.basicConfig(format='%(asctime)s - %(levelname)s - %(funcName)s - %(message)s', level=logging.ERROR)
 
 # Create a FileHandler to write log messages to a file
 file_handler = logging.FileHandler(f"{os.getcwd()}/logs/track_sensor.log")
@@ -44,10 +44,9 @@ modbus_port = 13000
 cert = f"{os.getcwd()}/TLS/track_cert.pem"
 key = f"{os.getcwd()}/TLS/track_key.pem"
 
-
-
-track_status = [0]*6
-track_updates = [0]*6
+track_status = [0] * 6
+track_updates = [0] * 6
+track_mutex = asyncio.Lock()
 
 sequence_number_modbus = 0
 sequence_number_train = 0
@@ -60,7 +59,7 @@ update_key_mutex = asyncio.Lock()
 
 async def handle_train_server() -> None:
     async def receive_data(reader: asyncio.StreamReader,
-                          writer: asyncio.StreamWriter) -> None:
+                           writer: asyncio.StreamWriter) -> None:
 
         global secret_key_trains
         global sequence_number_train
@@ -99,7 +98,6 @@ async def handle_train_server() -> None:
 
         while True:
             data = await reader.read(1024)
-            logging.info("Received data")
 
             received_header = data[:8]
             message_type, data_length = struct.unpack('!II', received_header)
@@ -122,6 +120,8 @@ async def handle_train_server() -> None:
                 signature = received_data[1 + amount_to_read + 3:]
 
                 data = received_data[:amount_to_read].split(" ")
+
+                logging.info(data)
 
                 if not data_id > sequence_number_train:
                     continue
@@ -148,9 +148,15 @@ async def handle_train_server() -> None:
                     await writer.drain()
 
                     logging.info("Verified signature on data. Updating status")
+                    logging.info(data[0])
+                    logging.info(data[1])
 
-                    track_status[int(data[1]) - 1] = int(data[2])
-                    track_updates[int(data[1]) - 1] = 1
+                    async with track_mutex:
+                        track_status[int(data[0]) - 1] = int(data[1])
+                        track_updates[int(data[0]) - 1] = 1
+
+                        logging.info(track_status)
+                        logging.info(track_updates)
                 else:
                     logging.critical("Found wrong signature in data")
             else:
@@ -370,7 +376,7 @@ async def update_track_simulation(idx: int, context: ModbusServerContext) -> Non
     global sequence_number_modbus
     global track_status
 
-    data = str(idx) + str(track_status[idx])
+    data = str(track_status[idx])
 
     client_verified = False
 
@@ -395,25 +401,26 @@ async def update_track_simulation(idx: int, context: ModbusServerContext) -> Non
                     [sequence_number_modbus] + [len(data)] + [ord(char) for char in data] + [32] + nonce +
                     [32] + [ord(char) for char in temp_signature])
 
-            logging.debug("Sending data")
+            logging.info("Sending data")
             context[0x00].setValues(3, 0x00, data_to_send)
 
-            logging.debug("Resetting flag")
-            context[0x00].setValues(3, datastore_size - 2, [0])
+            logging.info("Resetting flag")
+            context[0x00].setValues(3, datastore_size - 2, [1])
 
             expected_signature = hmac.new(secret_key_modbus, str(nonce).encode(), hashlib.sha256).hexdigest()
 
-            logging.debug(f"nonce {str(nonce)}")
+            logging.info(f"nonce {str(nonce)}")
             expected_signature = [ord(char) for char in expected_signature]
-            logging.debug(f"Expecting: {expected_signature}")
+            logging.info(f"Expecting: {expected_signature}")
 
-            while context[0x00].getValues(3, datastore_size - 2, 1) == [0]:
-                logging.debug("Waiting for client to copy datastore; sleeping 0.5 seconds")
-                await asyncio.sleep(0.5)  # give the server control so it can answer the client
+            while context[0x00].getValues(3, datastore_size - 2, 1) != [0]:
+                logging.info("Waiting for client to copy datastore; sleeping 0.5 seconds")
+                await asyncio.sleep(1)  # give the server control so it can answer the client
 
             if context[0x00].getValues(3, 0, 64) == expected_signature:
-                logging.debug("Client is verified")
-                client_verified = True
+                logging.info("Client is verified")
+                track_updates[idx] = 0
+                return
             else:
                 logging.critical("Found wrong signature in holding register")
 
@@ -421,8 +428,12 @@ async def update_track_simulation(idx: int, context: ModbusServerContext) -> Non
 async def run_modbus(lst_of_contexts: list) -> None:
     while True:
         for i in range(6):
-            if track_updates[i] != 0:
-                await update_track_simulation(i, lst_of_contexts[i])
+            logging.info(f"checking track {i+1}")
+            logging.info(track_updates[i])
+            async with track_mutex:
+                if track_updates[i] != 0:
+                    logging.info(f"Found update at track {i+1}")
+                    await update_track_simulation(i, lst_of_contexts[i])
 
             await asyncio.sleep(5)
 
