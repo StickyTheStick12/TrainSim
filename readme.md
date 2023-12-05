@@ -316,6 +316,9 @@ The execution of the attack involves positioning oneself as a proxy between the 
 
 To carry out the attack, a TCP socket is established for the SCADA server to connect to, and a TCP client is created to connect to the switch. Subsequently, active participation in the Diffie-Hellman key exchange is required, leading to the generation of two distinct keys—one for the SCADA server and another for the switch. Following this, a Modbus client is created to connect to the simulation, and a Modbus server is established for the switch to connect to.
 
+For seamless transmission, it's essential to forward or at least acknowledge the packages the SCADA server sends to the switch, ensuring the SCADA server perceives communication with the PLC. Various options are available in this regard, including the choice to drop a package, modify its content, or generate entirely new packages to send to the switch as long as we acknowledge that we have received the SCADA package. Alternatively, the payload can be directly forwarded to the switch for a more transparent mitm attack and just change some packages which will make this harder to notice. 
+
+It's essential to highlight that a response to the SCADA server with the switch status is mandatory, achieved either by utilizing a local cache or querying the switch. Merely sending any response without considering the actual switch status isn't recommended from a realistic standpoint. This precaution is necessary due to the earlier point that, in most cases, a train won't actively query the switch for its status.Otherwise we could change that data too because that is the actual data the simulation uses for the trains.
  
 ## Key Rotation and Secure Communication
 
@@ -375,6 +378,8 @@ While the simulation strives to represent a realistic train station environment,
 3.  **Internet Connection:**
 
 -   Additionally, please note that the simulation requires a consistent internet connection as it periodically queries Trafikverket for train data. This ensures that the simulation stays synchronized with real-world train arrivals and departures. A stable internet connection is essential for the accurate functioning of the program, especially during the scheduled intervals for obtaining updated train information from Trafikverket. If the internet connection is lost, it may lead to potential issues and disrupt the normal operation of the simulation.
+4. ***Trafikverket***
+- Regrettably, our program is at the mercy of Trafikverket's data consistency. Issues may arise when the data received from Trafikverket deviates from the expected format. In testing, instances have occurred where arriving or departing trains had their tracks erroneously set to 'x' or '-' while still being in the process of arrival or departure. Unfortunately, due to Trafikverket's inconsistent data, such as canceling only the arrival or departure, our program may struggle to detect and handle these cases, leading to potential terminations when processing affected trains. The user cannot manually edit out these trains since the arrival and departure data is HMAC protected. Sadly, the only viable solutions for this issue are to either wait until the specified arrival or departure time has passed or attempt to modify the incoming data fetched from Trafikverket over HTTP.
 
 It's recommended to consider these limitations when using the simulation and to plan scenarios accordingly.
 
