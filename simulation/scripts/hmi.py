@@ -495,7 +495,7 @@ async def communication_with_trains() -> None:
 
                     recv_signature = await data_queue.get()
 
-                    if not expected_signature.hexdigest() == recv_signature.hex():
+                    if not expected_signature.hexdigest() == recv_signature.decode():
                         logging.critical("MITM detected")
                         raise RuntimeError
 
