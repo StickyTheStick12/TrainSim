@@ -414,7 +414,7 @@ async def communication_with_trains() -> None:
 
     train_key = base64.urlsafe_b64encode(derived_key)
 
-        read_comm_task = loop.create_task(read_comm_with_trains(reader_train, writer_train, data_queue))
+    read_comm_task = loop.create_task(read_comm_with_trains(reader_train, writer_train, data_queue))
 
     while True:
         data = await train_queue.get()
