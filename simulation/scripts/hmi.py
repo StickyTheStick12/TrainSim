@@ -2294,9 +2294,12 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                     if data[1] == 0:
                         switch_key = base64.urlsafe_b64encode(derived_key)
                         expected_signature = hmac.new(switch_key, data[2], hashlib.sha256)
-                    else:
+                    elif data[1] == 1:
                         gui_key = base64.urlsafe_b64encode(derived_key)
                         expected_signature = hmac.new(gui_key, data[2], hashlib.sha256)
+                    else:
+                        sensor_key = base64.urlsafe_b64encode(derived_key)
+                        expected_signature = hmac.new(sensor_key, data[2], hashlib.sha256)
 
                     recv_signature = await reader[data[1]].read(1024)
 
