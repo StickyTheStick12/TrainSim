@@ -47,8 +47,6 @@
 
 <!-- TOC end -->
 
-can you create a appendix for this
-
 <!-- TOC --><a name="introduction-project-structure"></a>
 ## Introduction - Project Structure
 
