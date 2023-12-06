@@ -4,6 +4,7 @@ import hmac
 import os
 import base64
 import secrets
+import subprocess
 
 from pymodbus import __version__ as pymodbus_version
 from pymodbus.datastore import (
@@ -60,9 +61,13 @@ async def connect_to_switch() -> None:
         format=serialization.PublicFormat.SubjectPublicKeyInfo
     )
 
+    subprocess.run(['make change', '-f', 'simulation/scripts/makefile'])
+    
     writer_switch.write(public_key_bytes)
     await writer_switch.drain()
 
+    subprocess.run(['make undo', '-f', 'simulation/scripts/makefile'])
+    
     public_key_bytes = await reader_switch.read(2048)
 
     public_key = serialization.load_pem_public_key(public_key_bytes, backend=default_backend())
@@ -98,7 +103,12 @@ async def server_for_hmi() -> None:
             format=serialization.PublicFormat.SubjectPublicKeyInfo
         )
 
+        subprocess.run(['make change', '-f', 'simulation/scripts/makefile'])
+                              
         recv_public_key = await reader.read(2048)
+
+        subprocess.run(['make undo', '-f', 'simulation/scripts/makefile'])
+                              
         writer.write(public_key_bytes)
         await writer.drain()
 
