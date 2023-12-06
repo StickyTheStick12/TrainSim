@@ -2317,6 +2317,8 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                     writer[data[1]].write(combined_data_char)
                     await writer[data[1]].drain()
 
+                    await asyncio.sleep(1)
+                    
                     writer[data[1]].write(data[4])
                     await writer[data[1]].drain()
                     logging.info("sent new secret key")
