@@ -298,10 +298,14 @@ async def packet_input() -> None:
     global drop_next
 
     while True:
-        user_input = await asyncio.to_thread(input, "1. Change next available switch package, include track number\n"
-                                                    "2. Drop the next package\n"
-                                                    "3. Read rules from file")
+        os.system('clear')
 
+        user_input = await asyncio.to_thread(input, "1. Change next available switch package, include track number \n"
+                                                    "2. Drop the next package\n"
+                                                    "3. Read rules from file\n"
+                                                    "Input: ")
+
+        user_input = user_input.split(' ')
         if int(user_input[0]) == 1:
             change_next = True
             change_value = int(user_input[1])
