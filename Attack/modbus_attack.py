@@ -29,8 +29,8 @@ switch_key = b""
 hmi_key = b""
 client = None
 
-cert = os.path.join(os.path.dirname(os.getcwd()), "TLS", "attack_cert.pem")
-key = os.path.join(os.path.dirname(os.getcwd()), "TLS", "attack_key.pem")
+cert = f"{os.pardir}/simulation/TLS/attack_cert.pem"
+key = f"{os.pardir}/simulation/TLS/attack_key.pem"
 
 datastore_size = 95
 
