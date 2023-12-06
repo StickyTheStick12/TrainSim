@@ -97,7 +97,7 @@ send_data = asyncio.Event()
 hmi_data_queue = multiprocessing.Queue()
 modbus_data_queue = asyncio.Queue()
 
-app = Flask(__name__, 
+app = Flask(__name__,
             template_folder=f"{os.getcwd()}/templates",
             static_folder=f"{os.getcwd()}/static")
 
@@ -404,6 +404,10 @@ async def communication_with_trains() -> None:
         except ConnectionRefusedError:
             logging.info("Connection to asyncio server failed. Retrying...")
             await asyncio.sleep(1)  # Wait for a while before retrying
+        except OSError:
+            logging.info("Connection to asyncio server failed. Retrying...")
+            await asyncio.sleep(1)  # Wait for a while before retrying
+
 
     derived_key = await dh_exchange(reader_train, writer_train)
 
@@ -1564,8 +1568,8 @@ async def sensor_comm() -> None:
                     else:
                         logging.info("Occupied track")
                         await modbus_data_queue.put(["T", str(i+1), "O"])
-                        track_status[i] = 1
                         track_reservations[i] = 0
+                        track_status[i] = 1
 
                     nonce = [ord(char) for char in nonce]
                     calc_signature = hmac.new(sensor_key, str(nonce).encode(), hashlib.sha256).hexdigest()
@@ -1691,6 +1695,9 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
         except ConnectionRefusedError:
             logging.info("Connection to asyncio server failed. Retrying...")
             await asyncio.sleep(1)  # Wait for a while before retrying
+        except OSError:
+            logging.info("Connection to asyncio server failed. Retrying...")
+            await asyncio.sleep(1)  # Wait for a while before retrying
 
     logging.info("Connected to asyncio switch server")
 
@@ -1704,6 +1711,9 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
         except ConnectionRefusedError:
             logging.info("Connection to asyncio server failed. Retrying...")
             await asyncio.sleep(1)  # Wait for a while before retrying
+        except OSError:
+            logging.info("Connection to asyncio server failed. Retrying...")
+            await asyncio.sleep(1)  # Wait for a while before retrying
 
     logging.info("Connected to asyncio gui server")
 
@@ -1715,6 +1725,9 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
             reader_track, writer_track = await asyncio.open_connection('localhost', 13006)
             break  # Break out of the loop if connection is successful
         except ConnectionRefusedError:
+            logging.info("Connection to asyncio server failed. Retrying...")
+            await asyncio.sleep(1)  # Wait for a while before retrying
+        except OSError:
             logging.info("Connection to asyncio server failed. Retrying...")
             await asyncio.sleep(1)  # Wait for a while before retrying
 
