@@ -45,6 +45,10 @@ file_handler = logging.FileHandler(f"{os.getcwd()}/logs/train.log")
 file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(funcName)s - %(message)s'))
 logging.getLogger().addHandler(file_handler)
 
+balise_information = [
+    {"type": 1, "position": (150, 130), "switch": "SW1", "speed_limit": 50},
+]
+
 trains = []
 
 for i in range(7):
@@ -274,7 +278,7 @@ async def handle_train(idx: int) -> None:
         if current_arrival != '-':
             request_for_switch = [
                 "s",
-                1,  # arrival code
+                balise_information[0]['type'],
                 this_train[5],
                 this_train[6]
             ]
