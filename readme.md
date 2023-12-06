@@ -3,12 +3,12 @@
 
 - [Introduction - Project Structure](#introduction-project-structure)
    * [Simulation Directory](#simulation-directory)
-      + [1. **TLS Subdirectory**](#1-tls-subdirectory)
-      + [2. **Log Subdirectory**](#2-log-subdirectory)
-      + [3. **Static Subdirectory**](#3-static-subdirectory)
-      + [4. **Templates Subdirectory**](#4-templates-subdirectory)
-      + [5. **Script Subdirectory**](#5-script-subdirectory)
-      + [6. **JSONs Subdirectory**](#6-jsons-subdirectory)
+      + [1. TLS Subdirectory](#1-tls-subdirectory)
+      + [2. Log Subdirectory](#2-log-subdirectory)
+      + [3. Static Subdirectory](#3-static-subdirectory)
+      + [4. Templates Subdirectory](#4-templates-subdirectory)
+      + [5. Script Subdirectory](#5-script-subdirectory)
+      + [6. JSONs Subdirectory](#6-jsons-subdirectory)
 - [Installation and Execution Guidelines](#installation-and-execution-guidelines)
 - [Architecture picture](#architecture-picture)
 - [HMI Description](#hmi-description)
@@ -46,6 +46,8 @@
 - [Known Limitations](#known-limitations)
 
 <!-- TOC end -->
+
+can you create a appendix for this
 
 <!-- TOC --><a name="introduction-project-structure"></a>
 ## Introduction - Project Structure
@@ -222,7 +224,7 @@ The backend server plays a central role in the simulation, handling various task
 ### Trains Script
 - Not a PLC, but part of the simulation part of the project
 - Operates independently and receives necessary data from the simulation.
-- Sends switch requests to SCADA server when departing or arriving.
+- Sends switch requests to SCADA server when departing or arriving
 - Updates track sensors when arriving or departing*.
 - *Please note: In real life the sensors can find the trains alone. How the detection works differs but it can be cameras or infrared sensors. Due to us having virtual trains we have to tell the sensors that a train is at this track and when it isn't anymore but isn't something that trains do in real life. 
 
@@ -300,7 +302,6 @@ The simulation employs various communication protocols to facilitate interaction
 ### Adding trains & train arrivals:
 
 1.  **Screenshot:**
-
   -   Capture a snapshot of the streamlined process for adding a train.
 2.  **Process Overview:**
    -   Adding a train is a straightforward process accessed through the HMI's timetable page. Users input a desired departure time, restricted to a maximum of 24 hours into the future. The simulation dynamically calculates both the arrival and actual departure times.
@@ -310,13 +311,13 @@ The simulation employs various communication protocols to facilitate interaction
   -   Two minutes prior to a train's scheduled arrival, the simulation checks the availability of the chosen track. If the track is occupied, the simulation intelligently seeks an alternative available track. In the event of no available tracks, the train patiently waits until a track becomes free.
 -   The simulation then communicates essential data to an available train, enabling it to operate autonomously.
 4.  **Train Arrival Process:**
-- Upon receiving data from the simulation, the train initiates the process by requesting the switch. It patiently awaits the simulation's green light before commencing its arrival animation.
+-   When the train receives data from the simulation, it begins the procedure by requesting access to the switch. To facilitate this, we've incorporated a basic balise that provides the train with the essential code for switch request. In reality, a balise typically conveys details about the proximity of a switch and speed limits.
+-   The train patiently waits for the simulation's authorization before initiating its arrival animation.
 
 <!-- TOC --><a name="removing-trains-train-departures"></a>
 ### Removing trains & train departures:
 
 1.  **Screenshot:**
-    
     -   Feature a screenshot capturing a train's departure phase.
 2.  **Process Overview:**
 -   Removing a train mirrors the simplicity of adding one. To remove a train, users need only choose the ID displayed on the website.
@@ -424,8 +425,8 @@ While the simulation strives to represent a realistic train station environment,
 3.  **Internet Connection:**
 
 -   Additionally, please note that the simulation requires a consistent internet connection as it periodically queries Trafikverket for train data. This ensures that the simulation stays synchronized with real-world train arrivals and departures. A stable internet connection is essential for the accurate functioning of the program, especially during the scheduled intervals for obtaining updated train information from Trafikverket. If the internet connection is lost, it may lead to potential issues and disrupt the normal operation of the simulation.
-4. **Trafikverket:**
-- Regrettably, our program is at the mercy of Trafikverket's data consistency. Issues may arise when the data received from Trafikverket deviates from the expected format. In testing, instances have occurred where arriving or departing trains had their tracks erroneously set to 'x' or '-' while they still are arriving or departing from the station. Unfortunately, due to Trafikverket's inconsistent data, such as canceling only the arrival or departure, our program may struggle to detect and handle these cases, leading to potential terminations when processing affected trains. Due to the fact that the arrival and departure is HMAC protected a user cant edit out that train if they find it. Sadly, the only viable solutions for this issue are to either wait until the specified arrival or departure time has passed or attempt to modify the incoming data fetched from Trafikverket over HTTP.
+4. **Trafikverket**
+Regrettably, our program is at the mercy of Trafikverket's data consistency. Issues may arise when the data received from Trafikverket deviates from the expected format. In testing, instances have occurred where arriving or departing trains had their tracks erroneously set to 'x' or '-' while they still are arriving or departing from the station. Unfortunately, due to Trafikverket's inconsistent data, such as canceling only the arrival or departure, our program may struggle to detect and handle these cases, leading to potential terminations when processing affected trains. Due to the fact that the arrival and departure is HMAC protected a user cant edit out that train if they find it. Sadly, the only viable solutions for this issue are to either wait until the specified arrival or departure time has passed or attempt to modify the incoming data fetched from Trafikverket over HTTP.
 
 It's recommended to consider these limitations when using the simulation and to plan scenarios accordingly.
 
