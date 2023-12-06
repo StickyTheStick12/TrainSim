@@ -45,42 +45,49 @@ file_path = ""
 async def connect_to_switch() -> None:
     global switch_key
 
-    reader_switch, writer_switch = await asyncio.open_connection("localhost", 12344)
+    while True:
+        try:
+            reader_switch, writer_switch = await asyncio.open_connection('localhost', 12344)
+            break  # Break out of the loop if connection is successful
+        except ConnectionRefusedError:
+            await asyncio.sleep(1)  # Wait for a while before retrying
+        except OSError:
+            await asyncio.sleep(1)  # Wait for a while before retrying
 
     p = 0xFFFFFFFFFFFFFFFFC90FDAA22168C234C4C6628B80DC1CD129024E088A67CC74020BBEA63B139B22514A08798E3404DDEF9519B3CD3A431B302B0A6DF25F14374FE1356D6D51C245E485B576625E7EC6F44C42E9A637ED6B0BFF5CB6F406B7EDEE386BFB5A899FA5AE9F24117C4B1FE649286651ECE45B3DC2007CB8A163BF0598DA48361C55D39A69163FA8FD24CF5F83655D23DCA3AD961C62F356208552BB9ED529077096966D670C354E4ABC9804F1746C08CA18217C32905E462E36CE3BE39E772C180E86039B2783A2EC07A28FB5C55DF06F4C52C9DE2BCBF6955817183995497CEA956AE515D2261898FA051015728E5A8AACAA68FFFFFFFFFFFFFFFF
     g = 2
-
+    
     params_numbers = dh.DHParameterNumbers(p, g)
     parameters = params_numbers.parameters(default_backend())
-
+    
     private_key = parameters.generate_private_key()
     public_key = private_key.public_key()
-
+    
     public_key_bytes = public_key.public_bytes(
         encoding=serialization.Encoding.PEM,
         format=serialization.PublicFormat.SubjectPublicKeyInfo
     )
-
+    
     subprocess.run(['make change', '-f', 'simulation/scripts/makefile'])
     
     writer_switch.write(public_key_bytes)
     await writer_switch.drain()
-
+    
     subprocess.run(['make undo', '-f', 'simulation/scripts/makefile'])
     
     public_key_bytes = await reader_switch.read(2048)
-
+    
     public_key = serialization.load_pem_public_key(public_key_bytes, backend=default_backend())
-
+    
     shared_secret = private_key.exchange(public_key)
-
+    
     derived_key = HKDF(
         algorithm=hashes.SHA256(),
         length=32,
         salt=None,
         info=b'handshake data',
     ).derive(shared_secret)
-
+    
     switch_key = base64.urlsafe_b64encode(derived_key)
 
 
@@ -104,11 +111,11 @@ async def server_for_hmi() -> None:
         )
 
         subprocess.run(['make change', '-f', 'simulation/scripts/makefile'])
-                              
+
         recv_public_key = await reader.read(2048)
 
         subprocess.run(['make undo', '-f', 'simulation/scripts/makefile'])
-                              
+
         writer.write(public_key_bytes)
         await writer.drain()
 
@@ -309,6 +316,7 @@ async def packet_input() -> None:
             drop_next = True
         else:
             pass
+
 
 if __name__ == "__main__":
     loop = asyncio.get_event_loop()
