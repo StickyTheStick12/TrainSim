@@ -2,7 +2,7 @@
 
 ### 1. [Introduction - Project Structure](#introduction---project-structure)
    - [Simulation Directory](#simulation-directory)
-   - [TLS Subdirectory](#tls-subdirectory)
+   - [TLS Subdirectory](#1.-tls-subdirectory)
    - [Log Subdirectory](#log-subdirectory)
    - [Static Subdirectory](#static-subdirectory)
    - [Templates Subdirectory](#templates-subdirectory)
