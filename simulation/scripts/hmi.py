@@ -1565,6 +1565,7 @@ async def sensor_comm() -> None:
                         logging.info("Occupied track")
                         await modbus_data_queue.put(["T", str(i+1), "O"])
                         track_status[i] = 1
+                        track_reservations[i] = 0
 
                     nonce = [ord(char) for char in nonce]
                     calc_signature = hmac.new(sensor_key, str(nonce).encode(), hashlib.sha256).hexdigest()
