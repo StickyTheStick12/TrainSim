@@ -190,9 +190,10 @@ async def client_for_hmi() -> None:
             client.close()
 
     loop = asyncio.get_event_loop()
-
     loop.create_task(run_client())
-    loop.run_until_complete(read_holding_register())
+
+    await asyncio.sleep(5)
+    await read_holding_register()
 
 
 def setup_server() -> ModbusServerContext:
