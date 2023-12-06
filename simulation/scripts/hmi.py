@@ -133,6 +133,8 @@ MESSAGE_TYPE_SIGNATURE = 3
 
 train_mutex = asyncio.Lock()
 
+sequence_number_switch = 0
+
 
 class Users(UserMixin):
     def __init__(self, username, password, is_active=True):
@@ -1607,6 +1609,7 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
     global file_secret_key
     global entries_in_gui
     global sensor_key
+    global sequence_number_switch
 
     loop = asyncio.get_event_loop()
     switch_queue = asyncio.Queue()
@@ -1614,7 +1617,6 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
     func_code = 3  # function code for modbus that we want to read and write data from holding register
     slave_id = 0x00  # we broadcast the data to all the connected slaves
 
-    sequence_number_switch = 0
     sequence_number_gui = 0
     sequence_number_track = 0
 
@@ -2385,6 +2387,8 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                     if context[slave_id].getValues(func_code, 0, 64) == expected_signature:
                         logging.debug("Client is verified")
                         client_verified = True
+
+
                     else:
                         logging.critical("Found wrong signature in holding register")
             case _:
@@ -2438,6 +2442,19 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                         client_verified = True
                     else:
                         logging.critical("Found wrong signature")
+
+
+async def switch_update(context: ModbusServerContext, switch_key: bytes) -> None:
+    global switch_status
+    global sequence_number_switch
+
+    while True:
+        switch_status, sequence_number_switch = await get_switch_status(context, switch_key,
+                                                                        sequence_number_switch)
+        
+        await modbus_data_queue.put(["S", str(switch_status)])
+
+        await asyncio.sleep(10)
 
 
 # ------------------------------- #
