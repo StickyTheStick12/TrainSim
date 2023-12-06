@@ -117,10 +117,17 @@ async def handle_track_data() -> None:
     global track_queue
     global track_key
     global sequence_number_track
-
-    await asyncio.sleep(3)
-
-    reader_track, writer_track = await asyncio.open_connection("localhost", 13007)
+    
+    while True:
+        try:
+            reader_track, writer_track = await asyncio.open_connection("localhost", 13007)
+            break  # Break out of the loop if connection is successful
+        except ConnectionRefusedError:
+            logging.info("Connection to asyncio server failed. Retrying...")
+            await asyncio.sleep(1)  # Wait for a while before retrying
+        except OSError:
+            logging.info("Connection to asyncio server failed. Retrying...")
+            await asyncio.sleep(1)  # Wait for a while before retrying
 
     derived_key = await dh_exchange(reader_track, writer_track)
     track_key = base64.urlsafe_b64encode(derived_key)
