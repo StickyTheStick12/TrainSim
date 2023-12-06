@@ -395,7 +395,6 @@ async def communication_with_trains() -> None:
     global train_key
     data_queue = asyncio.Queue()
     rotation = 0
-
     loop = asyncio.get_event_loop()
 
     while True:
@@ -408,7 +407,6 @@ async def communication_with_trains() -> None:
         except OSError:
             logging.info("Connection to asyncio server failed. Retrying...")
             await asyncio.sleep(1)  # Wait for a while before retrying
-
 
     derived_key = await dh_exchange(reader_train, writer_train)
 
@@ -558,6 +556,7 @@ async def read_comm_with_trains(reader: asyncio.StreamReader, writer: asyncio.St
         data = await reader.read(1024)
 
         logging.info("Received data")
+
         data = data.decode()
         logging.info(data)
 
@@ -643,7 +642,7 @@ async def modbus_server_thread(context: ModbusServerContext) -> None:
         }
     )
 
-    address = ("localhost", modbus_port)
+    address = ("192.186.1.2", modbus_port)
 
     await StartAsyncTlsServer(
         context=context,
@@ -1628,7 +1627,6 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
         logging.info("Removed old files")
         os.remove(f"{os.getcwd()}/JSONs/derparture.json")
         os.remove(f"{os.getcwd()}/JSONs/arrival.json")
-
     except FileNotFoundError:
         pass
 
@@ -1696,7 +1694,7 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
 
     while True:
         try:
-            reader_switch, writer_switch = await asyncio.open_connection('localhost', 12344)
+            reader_switch, writer_switch = await asyncio.open_connection("192.186.1.2", 12344)
             break  # Break out of the loop if connection is successful
         except ConnectionRefusedError:
             logging.info("Connection to asyncio server failed. Retrying...")
@@ -1725,6 +1723,9 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
 
     derived_key = await dh_exchange(reader_gui, writer_gui)
     gui_key = base64.urlsafe_b64encode(derived_key)
+
+    # rotation_gui = 3
+    await update_keys(gui_key, 1)
 
     while True:
         try:
@@ -2326,8 +2327,6 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                     writer[data[1]].write(combined_data_char)
                     await writer[data[1]].drain()
 
-                    await asyncio.sleep(1)
-                    
                     writer[data[1]].write(data[4])
                     await writer[data[1]].drain()
                     logging.info("sent new secret key")
