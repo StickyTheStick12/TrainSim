@@ -413,7 +413,7 @@ async def communication_with_trains() -> None:
 
     train_key = base64.urlsafe_b64encode(derived_key)
 
-    loop.create_task(read_comm_with_trains(reader_train, writer_train, data_queue))
+        read_comm_task = loop.create_task(read_comm_with_trains(reader_train, writer_train, data_queue))
 
     while True:
         data = await train_queue.get()
@@ -441,7 +441,6 @@ async def communication_with_trains() -> None:
 
             if sequence_number_train == 100:
                 logging.info("Updating secret key")
-
                 new_key = Fernet.generate_key()
                 cipher = Fernet(train_key)
                 encrypted_message = cipher.encrypt(new_key)
@@ -454,6 +453,10 @@ async def communication_with_trains() -> None:
 
                     p = 0xFFFFFFFFFFFFFFFFC90FDAA22168C234C4C6628B80DC1CD129024E088A67CC74020BBEA63B139B22514A08798E3404DDEF9519B3CD3A431B302B0A6DF25F14374FE1356D6D51C245E485B576625E7EC6F44C42E9A637ED6B0BFF5CB6F406B7EDEE386BFB5A899FA5AE9F24117C4B1FE649286651ECE45B3DC2007CB8A163BF0598DA48361C55D39A69163FA8FD24CF5F83655D23DCA3AD961C62F356208552BB9ED529077096966D670C354E4ABC9804F1746C08CA18217C32905E462E36CE3BE39E772C180E86039B2783A2EC07A28FB5C55DF06F4C52C9DE2BCBF6955817183995497CEA956AE515D2261898FA051015728E5A8AACAA68FFFFFFFFFFFFFFFF
                     g = 2
+
+                    data = data_queue.get()
+
+                    read_comm_task.cancel()
 
                     params_numbers = dh.DHParameterNumbers(p, g)
                     parameters = params_numbers.parameters(default_backend())
@@ -495,11 +498,13 @@ async def communication_with_trains() -> None:
 
                     recv_signature = await data_queue.get()
 
-                    if not expected_signature.hexdigest() == recv_signature.decode():
+                    if not expected_signature.hexdigest() == recv_signature.hex():
                         logging.critical("MITM detected")
                         raise RuntimeError
 
                     rotation = 0
+
+                    read_comm_task = loop.create_task(read_comm_with_trains(reader_train, writer_train, data_queue))
                 else:
                     msg = ":>K"
                     writer_train.write(msg.encode())
