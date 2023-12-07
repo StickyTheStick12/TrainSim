@@ -263,11 +263,11 @@ The simulation employs various communication protocols to facilitate interaction
 ### Adding trains & train arrivals:
 
 1.  **Screenshot:**
-  -   Capture a snapshot of the streamlined process for adding a train.
+  ![alt text](https://github.com/StickyTheStick12/TrainSim/blob/master/train_arrival.png?raw=true)
 2.  **Process Overview:**
    -   Adding a train is a straightforward process accessed through the HMI's timetable page. Users input a desired departure time, restricted to a maximum of 24 hours into the future. The simulation dynamically calculates both the arrival and actual departure times.
    -  Track selection offers flexibility, with users choosing from any of the 6 available tracks. The train name, serving as an identifier on the timetable GUI, can be customized at the user's discretion.
-    -   Behind the scenes, the simulation seamlessly manages the creation of the train, handling all necessary details effortlessly.
+    -   Behind the scenes, the simulation seamlessly manages the creation of the train, handling all necessary details effortlessly. As you can see in the picture the departure time has been updated to a time that the simulation believes is better. The departure time in the website is the old time that we wished for when creating the train and the departure time in the GUI is the new departure time.
    3. **Track Availability Check:**
   -   Two minutes prior to a train's scheduled arrival, the simulation checks the availability of the chosen track. If the track is occupied, the simulation intelligently seeks an alternative available track. In the event of no available tracks, the train patiently waits until a track becomes free.
 -   The simulation then communicates essential data to an available train, enabling it to operate autonomously.
