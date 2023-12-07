@@ -30,8 +30,8 @@ switch_key = b""
 hmi_key = b""
 client = None
 
-cert = "/home/vboxuser/Downloads/TrainSim-master/simulation/TLS/attack_cert.pem"
-key = "/home/vboxuser/Downloads/TrainSim-master/simulation/TLS/attack_key.pem"
+cert = os.path.join(os.path.dirname(os.getcwd()), "simulation/TLS/attack_cert.pem") 
+key = os.path.join(os.path.dirname(os.getcwd()), "simulation/TLS/attack_key.pem") 
 
 datastore_size = 95
 
@@ -139,6 +139,7 @@ async def server_for_hmi() -> None:
 
             cipher = Fernet(hmi_key)
             hmi_key = cipher.decrypt(data)
+            send_new_key.set()
 
     server = await asyncio.start_server(receive_key, "localhost", 12344)  # tcp to hmi
     async with server:
