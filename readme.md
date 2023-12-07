@@ -127,7 +127,7 @@ make kill
 Please note that the simulation doesn't support verbose mode by default. Instead, it is up to the user to change the logging level in each script to something lower. The default is set for error and is the recommended level.
 
 ## Architecture picture
-![alt text](https://github.com/StickyTheStick12/TrainSim/blob/master/High_level_architecture.png?raw=true)
+![alt text](https://github.com/StickyTheStick12/TrainSim/blob/master/HLA.png?raw=true)
 
 ## HMI Description
 
@@ -278,7 +278,7 @@ The simulation employs various communication protocols to facilitate interaction
 ### Removing trains & train departures:
 
 1.  **Screenshot:**
-    -   Feature a screenshot capturing a train's departure phase.
+  ![alt text](https://github.com/StickyTheStick12/TrainSim/blob/master/train_departure.png?raw=true)
 2.  **Process Overview:**
 -   Removing a train mirrors the simplicity of adding one. To remove a train, users need only choose the ID displayed on the website.
 -   When a train is ready to depart, it follows a familiar process of requesting the switch and awaiting a green light from the simulation. The train then smoothly transitions into its departure animation.
