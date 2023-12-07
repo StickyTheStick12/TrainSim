@@ -315,7 +315,7 @@ async def packet_input() -> None:
 
     while True:
         os.system('clear')
-        print("""        ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢸⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+        print("""        ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀ ⠀⠀⠀⠀⠀⢸⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
         ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⡏⠀⠀⠀⠀⠀⠀⠀⠀⡀⠀⠀
         ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠙⢶⣄⠀⢰⡇⠀⠀⠀⠀⠀⠀⣠⡾⠃⠀⠀
         ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠙⠻⣾⡇⠀⠀⠀⠀⣠⣾⠋⠀⠀⠀⠀
@@ -356,4 +356,3 @@ if __name__ == "__main__":
     loop.create_task(change_packet())
     loop.create_task(packet_input())
     loop.run_until_complete(client_for_hmi())
- 
