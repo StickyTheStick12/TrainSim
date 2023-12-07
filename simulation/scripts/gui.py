@@ -93,7 +93,7 @@ class TrainStation(ctk.CTk):
     def create_timetable_layout(self):
         """Create the timetable layout in the timetable frame"""
         # Create labels for each header
-        timetable_label = ctk.CTkLabel(self.timetable_frame, text="Timetable", font=self.title_font,
+        timetable_label = ctk.CTkLabel(self.timetable_frame, text="            Timetable", font=self.title_font,
                                        corner_radius=6)
         train_label = ctk.CTkLabel(self.timetable_frame, text="Departure", font=self.subtitle_font, corner_radius=3)
         track_label = ctk.CTkLabel(self.timetable_frame, text="Destination", font=self.subtitle_font,
