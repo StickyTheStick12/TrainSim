@@ -1572,11 +1572,13 @@ async def sensor_comm() -> None:
                         track_semaphore.release()
                         await modbus_data_queue.put(["T", str(i + 1), "A"])
                         track_status[i] = 0
+                        await departure_to_data()
                     else:
                         logging.info("Occupied track")
                         await modbus_data_queue.put(["T", str(i + 1), "O"])
                         track_reservations[i] = 0
                         track_status[i] = 1
+                        await departure_to_data()
 
                     nonce = [ord(char) for char in nonce]
                     calc_signature = hmac.new(sensor_key, str(nonce).encode(), hashlib.sha256).hexdigest()
@@ -1762,7 +1764,7 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
     logging.info("Connected to track sensor server")
 
     loop.create_task(switch_update(context, switch_key))
-    
+
     while True:
         # Run blocking call in executor so all the other tasks can run and the server
         data = await modbus_data_queue.get()
@@ -1907,7 +1909,9 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                 json_data = await read_from_file(0)
 
                 has_arrived = False
-
+                
+                logging.info(f"arrived trains {arrived_trains}")
+                
                 for idx, train in enumerate(json_data):
                     if 'id' in train and train['id'] == data[2]:
                         if data[2] in arrived_trains:
@@ -2451,7 +2455,7 @@ async def switch_update(context: ModbusServerContext, switch_key: bytes) -> None
         switch_status, sequence_number_switch = await get_switch_status(context, switch_key,
                                                                         sequence_number_switch)
 
-        await modbus_data_queue.put(["S", str(switch_status)])
+        await modbus_data_queue.put(["S", switch_status])
 
         await asyncio.sleep(10)
 
