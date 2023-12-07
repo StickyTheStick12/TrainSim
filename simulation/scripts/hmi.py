@@ -1261,7 +1261,7 @@ async def write_to_file(data: Union[dict, List], file_nr: int) -> None:
 
         # Write content to the file
         async with departure_file_mutex:
-            with open(f"{os.getcwd()}/JSONs/derparture.json","w") as file:
+            with open(f"{os.getcwd()}/JSONs/departure.json","w") as file:
                 file.write(content)
 
         departure_file_version += 1
@@ -1298,7 +1298,7 @@ async def read_from_file(file_nr: int) -> Union[dict, List]:
     else:
         try:
             async with departure_file_mutex:
-                with open(f"{os.getcwd()}/JSONs/derparture.json","r") as file:
+                with open(f"{os.getcwd()}/JSONs/departure.json","r") as file:
                     content = file.read()
         except (FileNotFoundError, json.JSONDecodeError):
             logging.error("Cannot find or decode file")
@@ -1627,7 +1627,7 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
     # remove old json files
     try:
         logging.info("Removed old files")
-        os.remove(f"{os.getcwd()}/JSONs/derparture.json")
+        os.remove(f"{os.getcwd()}/JSONs/departure.json")
         os.remove(f"{os.getcwd()}/JSONs/arrival.json")
     except FileNotFoundError:
         pass
