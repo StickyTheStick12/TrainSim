@@ -1,5 +1,10 @@
 #!/bin/bash
 
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Define the target directory relative to the script
+target_dir="your/target/directory"
+
 # Specify the directory where your Python files are located
 python_files_directory="/path/to/your/python/files"
 
