@@ -263,7 +263,7 @@ The simulation employs various communication protocols to facilitate interaction
 ### Adding trains & train arrivals:
 
 1.  **Screenshot:**
-  ![alt text](https://github.com/StickyTheStick12/TrainSim/blob/master/train_arrival.png?raw=true)
+  ![alt text](https://github.com/StickyTheStick12/TrainSim/blob/master/doc_pictures/train_arrival.png?raw=true)
 3.  **Process Overview:**
    -   Adding a train is a straightforward process accessed through the HMI's timetable page. Users input a desired departure time, restricted to a maximum of 24 hours into the future. The simulation dynamically calculates both the arrival and actual departure times.
    -  Track selection offers flexibility, with users choosing from any of the 6 available tracks. The train name, serving as an identifier on the timetable GUI, can be customized at the user's discretion.
@@ -278,7 +278,7 @@ The simulation employs various communication protocols to facilitate interaction
 ### Removing trains & train departures:
 
 1.  **Screenshot:**
-  ![alt text](https://github.com/StickyTheStick12/TrainSim/blob/master/train_departure.png?raw=true)
+  ![alt text](https://github.com/StickyTheStick12/TrainSim/blob/master/doc_pictures/train_departure.png?raw=true)
 2.  **Process Overview:**
 -   Removing a train mirrors the simplicity of adding one. To remove a train, users need only choose the ID displayed on the website.
 -   When a train is ready to depart, it follows a familiar process of requesting the switch and awaiting a green light from the simulation. The train then smoothly transitions into its departure animation.
