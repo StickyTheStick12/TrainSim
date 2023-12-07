@@ -127,7 +127,7 @@ make kill
 Please note that the simulation doesn't support verbose mode by default. Instead, it is up to the user to change the logging level in each script to something lower. The default is set for error and is the recommended level.
 
 ## Architecture picture
-![alt text](https://github.com/StickyTheStick12/TrainSim/blob/master/HLA.png?raw=true)
+![alt text](https://github.com/StickyTheStick12/TrainSim/blob/master/doc_pictures/HLA.png?raw=true)
 
 ## HMI Description
 
@@ -264,7 +264,7 @@ The simulation employs various communication protocols to facilitate interaction
 
 1.  **Screenshot:**
   ![alt text](https://github.com/StickyTheStick12/TrainSim/blob/master/train_arrival.png?raw=true)
-2.  **Process Overview:**
+3.  **Process Overview:**
    -   Adding a train is a straightforward process accessed through the HMI's timetable page. Users input a desired departure time, restricted to a maximum of 24 hours into the future. The simulation dynamically calculates both the arrival and actual departure times.
    -  Track selection offers flexibility, with users choosing from any of the 6 available tracks. The train name, serving as an identifier on the timetable GUI, can be customized at the user's discretion.
     -   Behind the scenes, the simulation seamlessly manages the creation of the train, handling all necessary details effortlessly. As you can see in the picture the departure time has been updated to a time that the simulation believes is better. The departure time in the website is the old time that we wished for when creating the train and the departure time in the GUI is the new departure time.
