@@ -35,7 +35,7 @@ kstart:
 	@echo "Starting Program 2"
 	konsole --noclose -e bash -c "python3 scripts/gui.py; exec bash" &
 	@echo "Starting Program 3"
-	konsole --noclose -e bash -c "python3 scripts/Train.py; exec bash" &
+	konsole --noclose -e bash -c "python3 scripts/train.py; exec bash" &
 	@echo "starting program 4"
 	konsole --noclose -e bash -c "python3 scripts/switch.py; exec bash" &
 	@echo "starting program 5"
