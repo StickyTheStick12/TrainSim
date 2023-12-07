@@ -29,7 +29,7 @@
 - [Description of Normal Operation](#description-of-normal-operation)
    * [Adding trains & train arrivals:](#adding-trains-train-arrivals)
    * [Removing trains & train departures:](#removing-trains-train-departures)
-   * [Continuous Operation (Quick Overview):](#continuous-operation-quick-overview)
+   * [Continuous Operation:](#continuous-operation)
       + [Additional Insights:](#additional-insights)
          - [Time scheduling](#time-scheduling)
          - [Updates to departure time and switch acqusition](#updates-to-departure-time-and-switch-acqusition)
@@ -284,13 +284,8 @@ The simulation employs various communication protocols to facilitate interaction
 -   When a train is ready to depart, it follows a familiar process of requesting the switch and awaiting a green light from the simulation. The train then smoothly transitions into its departure animation.
 -   Both train removal and departure share the same function. The simulation initially checks whether the train has arrived. If it hasn't, indicative of removal scenarios, the entry in the timetable is promptly deleted. In the case of an arrived train, the same deletion process occurs, accompanied by the initiation of the train's departure animation.
 
-### Continuous Operation (Quick Overview):
-
-1.  **Screenshot:**
-    
-    -   Showcase a screenshot capturing the system's continuous operation.
-    
-2.  **Explanation:**
+### Continuous Operation:
+1.  **Explanation:**
 The simulation is meticulously crafted for uninterrupted, autonomous operation. It dynamically generates trains based on real-time data from Trafikverket, ensuring a continuous flow of train activities. The system operates seamlessly without the need for manual intervention through the HMI. From train creation to switch requests, and through the entire arrival and departure process, the system adeptly manages the railway operations.
 
 #### Additional Insights:
