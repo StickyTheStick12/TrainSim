@@ -344,7 +344,7 @@ def logPage():
 
 
 def open_json(json_file):
-    with mutex, open(f"{os.getcwd()}/JSONs/{json_file}","r") as dataFile:
+    with mutex, open(f"{os.getcwd()}/JSONs/{json_file}", "r") as dataFile:
         json_data = json.load(dataFile)
     return json_data
 
@@ -352,7 +352,7 @@ def open_json(json_file):
 def writeToJson(json_file, data_json):
     data_json = json.dumps(data_json, indent=3)
 
-    with mutex, open(f"{os.getcwd()}/JSONs/{json_file}","w") as dataFile:
+    with mutex, open(f"{os.getcwd()}/JSONs/{json_file}", "w") as dataFile:
         dataFile.write(data_json)
 
 
@@ -644,7 +644,7 @@ async def modbus_server_thread(context: ModbusServerContext) -> None:
         }
     )
 
-    address = ("192.186.1.2", modbus_port)
+    address = ("localhost", modbus_port)
 
     await StartAsyncTlsServer(
         context=context,
@@ -1207,7 +1207,7 @@ async def departure_to_data():
     """Copies departure.json to data.json for the hmi"""
     departure_data = await read_from_file(1)
 
-    with mutex, open(f"{os.getcwd()}/JSONs/data.json","r") as datafile:
+    with mutex, open(f"{os.getcwd()}/JSONs/data.json", "r") as datafile:
         data = json.load(datafile)
 
     for i in range(1, 7):
@@ -1226,7 +1226,7 @@ async def departure_to_data():
             'track': departure_data[i]['TrackAtLocation']
         })
 
-    with mutex, open(f"{os.getcwd()}/JSONs/data.json","w") as datafile:
+    with mutex, open(f"{os.getcwd()}/JSONs/data.json", "w") as datafile:
         json.dump(data, datafile, indent=3)
 
 
@@ -1247,7 +1247,7 @@ async def write_to_file(data: Union[dict, List], file_nr: int) -> None:
 
         # Write content to the file
         async with arrival_file_mutex:
-            with open(f"{os.getcwd()}/JSONs/arrival.json","w") as file:
+            with open(f"{os.getcwd()}/JSONs/arrival.json", "w") as file:
                 file.write(content)
 
         arrival_file_version += 1
@@ -1261,7 +1261,7 @@ async def write_to_file(data: Union[dict, List], file_nr: int) -> None:
 
         # Write content to the file
         async with departure_file_mutex:
-            with open(f"{os.getcwd()}/JSONs/departure.json","w") as file:
+            with open(f"{os.getcwd()}/JSONs/departure.json", "w") as file:
                 file.write(content)
 
         departure_file_version += 1
@@ -1276,7 +1276,7 @@ async def read_from_file(file_nr: int) -> Union[dict, List]:
     if file_nr == 0:
         try:
             async with arrival_file_mutex:
-                with open(f"{os.getcwd()}/JSONs/arrival.json","r") as file:
+                with open(f"{os.getcwd()}/JSONs/arrival.json", "r") as file:
                     content = file.read()
         except (FileNotFoundError, json.JSONDecodeError):
             logging.error("Cannot find or decode file")
@@ -1298,7 +1298,7 @@ async def read_from_file(file_nr: int) -> Union[dict, List]:
     else:
         try:
             async with departure_file_mutex:
-                with open(f"{os.getcwd()}/JSONs/departure.json","r") as file:
+                with open(f"{os.getcwd()}/JSONs/departure.json", "r") as file:
                     content = file.read()
         except (FileNotFoundError, json.JSONDecodeError):
             logging.error("Cannot find or decode file")
@@ -1570,11 +1570,11 @@ async def sensor_comm() -> None:
                     if data == ['0']:
                         logging.info("Cleared track")
                         track_semaphore.release()
-                        await modbus_data_queue.put(["T", str(i+1), "A"])
+                        await modbus_data_queue.put(["T", str(i + 1), "A"])
                         track_status[i] = 0
                     else:
                         logging.info("Occupied track")
-                        await modbus_data_queue.put(["T", str(i+1), "O"])
+                        await modbus_data_queue.put(["T", str(i + 1), "O"])
                         track_reservations[i] = 0
                         track_status[i] = 1
 
@@ -1696,7 +1696,7 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
 
     while True:
         try:
-            reader_switch, writer_switch = await asyncio.open_connection("192.186.1.2", 12344)
+            reader_switch, writer_switch = await asyncio.open_connection("localhost", 12344)
             break  # Break out of the loop if connection is successful
         except ConnectionRefusedError:
             logging.info("Connection to asyncio server failed. Retrying...")
@@ -2451,7 +2451,7 @@ async def switch_update(context: ModbusServerContext, switch_key: bytes) -> None
     while True:
         switch_status, sequence_number_switch = await get_switch_status(context, switch_key,
                                                                         sequence_number_switch)
-        
+
         await modbus_data_queue.put(["S", str(switch_status)])
 
         await asyncio.sleep(10)
