@@ -30,16 +30,15 @@ switch_key = b""
 hmi_key = b""
 client = None
 
-cert = os.path.join(os.path.dirname(os.getcwd()), "simulation/TLS/attack_cert.pem") 
-key = os.path.join(os.path.dirname(os.getcwd()), "simulation/TLS/attack_key.pem") 
+cert = os.path.join(os.path.dirname(os.getcwd()), "simulation/TLS/attack_cert.pem")
+key = os.path.join(os.path.dirname(os.getcwd()), "simulation/TLS/attack_key.pem")
 
 datastore_size = 95
 
-switch_cache = 0
+switch_cache = 1
 drop_next = False
 change_next = False
 change_value = -1
-file_path = ""
 send_new_key = asyncio.Event()
 
 
@@ -323,10 +322,11 @@ async def packet_input() -> None:
                                                     "Input: ")
 
         user_input = user_input.split(' ')
+
         if int(user_input[0]) == 1:
             change_next = True
             change_value = int(user_input[1])
-        elif int(user_input[1]) == 2:
+        elif int(user_input[0]) == 2:
             drop_next = True
         else:
             await recv_queue.put(int(user_input[1]))
