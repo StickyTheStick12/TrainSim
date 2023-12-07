@@ -1726,9 +1726,6 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
     derived_key = await dh_exchange(reader_gui, writer_gui)
     gui_key = base64.urlsafe_b64encode(derived_key)
 
-    # rotation_gui = 3
-    await update_keys(gui_key, 1)
-
     while True:
         try:
             reader_track, writer_track = await asyncio.open_connection('localhost', 13006)
@@ -1764,6 +1761,8 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
         await track_client.connect()
     logging.info("Connected to track sensor server")
 
+    loop.create_task(switch_update(context, switch_key))
+    
     while True:
         # Run blocking call in executor so all the other tasks can run and the server
         data = await modbus_data_queue.get()
