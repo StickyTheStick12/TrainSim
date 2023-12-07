@@ -4,7 +4,6 @@ import hmac
 import os
 import base64
 import secrets
-import subprocess
 
 from pymodbus import __version__ as pymodbus_version
 from pymodbus.datastore import (
@@ -23,6 +22,7 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import dh
+from cryptography.fernet import Fernet
 
 recv_queue = asyncio.Queue()
 send_queue = asyncio.Queue()
@@ -40,6 +40,7 @@ drop_next = False
 change_next = False
 change_value = -1
 file_path = ""
+send_new_key = asyncio.Event()
 
 
 async def connect_to_switch() -> None:
@@ -84,6 +85,17 @@ async def connect_to_switch() -> None:
 
     switch_key = base64.urlsafe_b64encode(derived_key)
 
+    while True:
+        await send_new_key.wait()
+
+        new_key = Fernet.generate_key()
+
+        cipher = Fernet(switch_key)
+        encrypted_key = cipher.encrypt(new_key)
+
+        writer_switch.write(encrypted_key)
+        await writer_switch.drain()
+
 
 async def server_for_hmi() -> None:
     async def receive_key(reader: asyncio.StreamReader,
@@ -121,6 +133,12 @@ async def server_for_hmi() -> None:
         ).derive(shared_secret)
 
         hmi_key = base64.urlsafe_b64encode(derived_key)
+
+        while True:
+            data = await reader.read(2048)
+
+            cipher = Fernet(hmi_key)
+            hmi_key = cipher.decrypt(data)
 
     server = await asyncio.start_server(receive_key, "localhost", 12344)  # tcp to hmi
     async with server:
@@ -281,8 +299,6 @@ async def change_packet() -> None:
         elif drop_next:
             drop_next = False
             continue
-        else:
-            pass
 
         switch_cache = data
 
@@ -302,7 +318,7 @@ async def packet_input() -> None:
 
         user_input = await asyncio.to_thread(input, "1. Change next available switch package, include track number \n"
                                                     "2. Drop the next package\n"
-                                                    "3. Read rules from file\n"
+                                                    "3. Create new switch request, include track number\n"
                                                     "Input: ")
 
         user_input = user_input.split(' ')
@@ -312,7 +328,7 @@ async def packet_input() -> None:
         elif int(user_input[1]) == 2:
             drop_next = True
         else:
-            pass
+            await recv_queue.put(int(user_input[1]))
 
 
 if __name__ == "__main__":
