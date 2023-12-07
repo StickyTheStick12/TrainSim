@@ -1909,9 +1909,7 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                 json_data = await read_from_file(0)
 
                 has_arrived = False
-                
-                logging.info(f"arrived trains {arrived_trains}")
-                
+
                 for idx, train in enumerate(json_data):
                     if 'id' in train and train['id'] == data[2]:
                         if data[2] in arrived_trains:
@@ -1945,8 +1943,6 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                         json_data.append(json_data.pop(idx))
                         await write_to_file(json_data, 0)
                         break
-                    else:
-                        has_arrived = True
 
                 json_data = await read_from_file(1)
 
@@ -1955,7 +1951,7 @@ async def handle_simulation_communication(context: ModbusServerContext) -> None:
                         if has_arrived:
                             switch_status, sequence_number_switch = await get_switch_status(context, switch_key,
                                                                                             sequence_number_switch)
-                            if switch_status != data[1]:
+                            if int(switch_status) != int(data[1]):
                                 logging.error("The train derailed when it tried to leave the station")
 
                             logging.info(created_trains)
@@ -2456,7 +2452,6 @@ async def switch_update(context: ModbusServerContext, switch_key: bytes) -> None
                                                                         sequence_number_switch)
 
         await modbus_data_queue.put(["S", switch_status])
-
         await asyncio.sleep(10)
 
 
