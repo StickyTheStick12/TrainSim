@@ -1,3 +1,4 @@
+
 - [Introduction - Project Structure](#introduction-project-structure)
    * [Simulation Directory](#simulation-directory)
       + [1. TLS Subdirectory](#1-tls-subdirectory)
@@ -72,7 +73,7 @@ For quick assistance, use:
 make help
 ```
 
-To run the program, begin by installing the necessary dependencies. You can either utilize the provided requirements list with the following command:
+To run the program, begin by installing the necessary dependencies. Ensure you have Python 3.10 or greater installed. You can either utilize the provided requirements list with the following command:
 ```bash
 pip install -r requirements.txt
 ```
@@ -189,6 +190,7 @@ The backend server plays a central role in the simulation, handling various task
 - Saves data into `arrival.json` and `departure.json`, protected with an HMAC for data integrity.
 - Manages data received from the web HMI, including logic for creating, deleting, or modifying train, track and switch information.
 - Communicates with the GUI application to provide real-time information.
+- Handles communication with the trains, giving them the correct information and updating said information.
 
 #### SCADA-like Simulation
 - Handles switch requests:
@@ -200,8 +202,7 @@ The backend server plays a central role in the simulation, handling various task
 - Not a PLC, but part of the simulation part of the project
 - Operates independently and receives necessary data from the simulation.
 - Sends switch requests to SCADA server when departing or arriving
-- Updates track sensors when arriving or departing*.
-- *Please note: In real life the sensors can find the trains alone. How the detection works differs but it can be cameras or infrared sensors. Due to us having virtual trains we have to tell the sensors that a train is at this track and when it isn't anymore but isn't something that trains do in real life. 
+- **Note:** Unlike real-life train detection methods such as cameras or infrared sensors, our virtual trains explicitly update track sensors upon arrival or departure. This is a simulation necessity to emulate real-world operations.
 
 ### Track Sensors
 - Not PLCs themselves, but their data is forwarded to PLCs.
@@ -210,9 +211,9 @@ The backend server plays a central role in the simulation, handling various task
 
 ### Switch
 - Receives updates from the SCADA server to change to specific tracks.
-- Includes functionality to query its status when a train arrives*.
-- The simulation will change which track the train is going to if the recieved switch status differs from the expected.
-- *Please note: This is probably not something that exists in real life. Ateast not like the way it is used in our simulation. By having a physical switch and trains the trains can just go forward and go to the correct track. Due to us having a virtual switch and virtual trains we have to query the switch for its status when we want to arrive/depart so we know the status of the switch, but we don't actively poll the switch for it's status, only when we need to. 
+- Includes functionality to query its status periodically to both give the train its correct status and to view changes to the PLC on the timetable.
+- The simulation will change which track the train is going to if the received switch status differs from the expected.
+- **Note:** In a real-world scenario, trains typically proceed based on the physical state of switches without actively querying the switch. Our simulation, being virtual, necessitates periodic status checks due to the absence of physical feedback mechanisms.
 
 ## Communication Protocols (Operator-HMI-SCADA-PLCs)
 
@@ -265,9 +266,9 @@ The simulation employs various communication protocols to facilitate interaction
 1.  **Screenshot:**
   ![alt text](https://github.com/StickyTheStick12/TrainSim/blob/master/doc_pictures/train_arrival.png?raw=true)
 3.  **Process Overview:**
-   -   Adding a train is a straightforward process accessed through the HMI's timetable page. Users input a desired departure time, restricted to a maximum of 24 hours into the future. The simulation dynamically calculates both the arrival and actual departure times.
+   -   Adding a train is a straightforward process accessible through the HMI's timetable page. Users input a desired departure time, restricted to a maximum of 24 hours into the future. The simulation dynamically calculates both the arrival and actual departure times.
    -  Track selection offers flexibility, with users choosing from any of the 6 available tracks. The train name, serving as an identifier on the timetable GUI, can be customized at the user's discretion.
-    -   Behind the scenes, the simulation seamlessly manages the creation of the train, handling all necessary details effortlessly. As you can see in the picture the departure time has been updated to a time that the simulation believes is better. The departure time in the website is the old time that we wished for when creating the train and the departure time in the GUI is the new departure time.
+   - Behind the scenes, the simulation seamlessly manages the creation of the train, handling all necessary details effortlessly. While the departure time showcased on the website reflects the user's initial request, the departure time in the GUI undergoes adjustments to align with real-time track availability. If we update the website we will see the same departure time as on the GUI.
    3. **Track Availability Check:**
   -   Two minutes prior to a train's scheduled arrival, the simulation checks the availability of the chosen track. If the track is occupied, the simulation intelligently seeks an alternative available track. In the event of no available tracks, the train patiently waits until a track becomes free.
 -   The simulation then communicates essential data to an available train, enabling it to operate autonomously.
@@ -302,20 +303,19 @@ Upon arrival or departure, trains communicate their track status to track sensor
 As the system integrates real-time data from Trafikverket, deleting data poses challenges. Instead of removing trains, the system marks them for deletion. During subsequent queries to Trafikverket, it cross-references the marked data with new data. If absent, the system removes them; otherwise, it retains them for future considerations. This approach maintains consistency in data handling and prevents unexpected inconsistencies.
 
 ## Description of the Attack Scenario and Steps to Reproduce the Attack
-The attack relies on the assumption that the attacker possesses knowledge of how the packages are constructed. It is essential to know the Modbus register size, given the utilization of a flag bit to indicate when a write operation has occurred. Furthermore, the understanding of the data's meaning, the application of HMAC-SHA256, and the existence of a 2-byte nonce within the packet must also be known.
+The attack scenario hinges on the presumption that the attacker possesses a deep understanding of how the packages are constructed. Crucial knowledge includes the Modbus register size, the use of a flag bit to indicate write operations, comprehension of data semantics, the application of HMAC-SHA256, and the presence of a 2-byte nonce within the packet.
 
-Executing the attack requires acting as a proxy between the SCADA server and the switch. If the simulation is accessible over the internet with open ports, ARP poisoning is employed to reroute the packets to the attacker. In a local environment, such as in our case where the entire simulation runs on the same host, it is presupposed that there is an existing means of accessing the machine—essentially a backdoor or some method for gaining access to the machine and editing the simulation files or use some form of iptables rules.
+Execution of the attack mandates positioning oneself as a proxy between the SCADA server and the switch. If the simulation is exposed to the internet with open ports, ARP poisoning redirects packets to the attacker. In a local environment, such as our case where the entire simulation resides on the same host, it is assumed there exists a pre-existing means of accessing the machine—a potential backdoor or a method for gaining access to the machine and manipulating simulation files or implementing iptables rules.
 
-To initiate the attack, start by establishing a connection to the machine through the pre-existing backdoor, which, in our scenario, was an open SSH port. Assuming prior enumeration and possession of login credentials, we gain full control over the machine, enabling us to edit various components. Notably, `arrival.json` and `departure.json` are safeguarded with HMAC, making alterations trigger program termination. However, the usercredentials.json file lacks protection, allowing changes to the password, username, thus gives us access to the web HMI for data manipulation.
+To initiate the attack, commence by establishing a connection to the machine through the existing backdoor, in our scenario, an open SSH port. With prior enumeration and possession of login credentials, full control over the machine is attained, allowing for the editing of various components. Notably, while `arrival.json` and `departure.json` are shielded with HMAC, which triggers program termination upon alterations, the usercredentials.json file lacks protection. This vulnerability enables changes to the password and username, granting access to the web HMI for data manipulation.
 
-Instead of focusing on modifying these JSON files, we execute the bash script `attack.sh`, designed to overwrite the port numbers in the `switch.py` file. Subsequently, a tailored attack script is created. This script establishes a TCP socket for the SCADA server to connect to and a TCP client to connect to the switch. Active participation in the Diffie-Hellman key exchange ensues, generating two distinct keys—one for the SCADA server and another for the switch. This is followed by creating a Modbus client to connect to the simulation and establishing a Modbus server for the switch to connect to.
+Rather than concentrating on modifying these JSON files, the execution of the `attack.sh` bash script takes precedence. This script is designed to overwrite port numbers in the `switch.py` file. Subsequently, a customized attack script is crafted. This script establishes a TCP socket for the SCADA server to connect to and a TCP client to connect to the switch. Active participation in the Diffie-Hellman key exchange ensues, generating two distinct keys—one for the SCADA server and another for the switch. Following this, a Modbus client connects to the simulation, and a Modbus server establishes a connection for the switch.
 
-To ensure smooth transmission and maintain the illusion of direct communication between the SCADA server and the PLC, it's crucial to forward or, at the very least, acknowledge the packages sent by the SCADA server to the switch. This acknowledgment is vital for the SCADA server to perceive ongoing communication with the PLC. Several options are available for achieving this, ranging from dropping a package, modifying its content, to generating entirely new packages to send to the switch—all while acknowledging that the SCADA package has been received. Another approach involves directly forwarding the payload to the switch, creating a more transparent man-in-the-middle attack that subtly alters specific packages, making detection more challenging.
+For seamless transmission and the maintenance of the illusion of direct communication between the SCADA server and the PLC, acknowledging or forwarding the packages sent by the SCADA server to the switch is crucial. The acknowledgment is vital for the SCADA server to perceive ongoing communication with the PLC. Various methods are available, including dropping a package, modifying its content, generating entirely new packages to send to the switch—all while acknowledging that the SCADA package has been received. Another approach involves directly forwarding the payload to the switch, creating a more transparent man-in-the-middle attack that subtly alters specific packages, making detection more challenging.
 
-It's essential to highlight that a response to the SCADA server with the switch status is mandatory, achieved either by utilizing a local cache or querying the switch when we receive a request from the hmi. Merely sending any response without considering the actual switch status isn't recommended from a realistic standpoint. This precaution is necessary due to the earlier point that, in most cases, a real life train won't actively query the switch for its status. Otherwise we could change that data too because that is the actual data the simulation uses for the trains.
+It is imperative to emphasize the necessity of responding to the SCADA server with the switch status, achieved through a local cache or querying the switch when receiving a request from the HMI. Sending any response without considering the actual switch status is not recommended from a realistic standpoint, as real-life trains typically won't actively query the switch for their status. This precaution is necessary to maintain the integrity of the simulation's realism and avoid unintended consequences on the simulated railway operations.
 
- ## Key Rotation and Secure Communication
-
+## Key Rotation and Secure Communication
 To enhance security measures, the simulation implements key rotation alongside robust cryptographic techniques for secure communication. Key aspects include:
 
 ### Key Rotation for Authentication
