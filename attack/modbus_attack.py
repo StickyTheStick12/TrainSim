@@ -35,10 +35,11 @@ key = os.path.join(os.path.dirname(os.getcwd()), "simulation/TLS/attack_key.pem"
 
 datastore_size = 95
 
-switch_cache = 1
+switch_cache = 0
 drop_next = False
 change_next = False
 change_value = -1
+file_path = ""
 send_new_key = asyncio.Event()
 
 
@@ -47,7 +48,7 @@ async def connect_to_switch() -> None:
 
     while True:
         try:
-            reader_switch, writer_switch = await asyncio.open_connection('localhost', 5010)
+            reader_switch, writer_switch = await asyncio.open_connection('localhost', 12344)
             break  # Break out of the loop if connection is successful
         except Exception as e:
             await asyncio.sleep(1)  # Wait for a while before retrying
@@ -140,7 +141,7 @@ async def server_for_hmi() -> None:
             hmi_key = cipher.decrypt(data)
             send_new_key.set()
 
-    server = await asyncio.start_server(receive_key, "localhost", 12344)  # tcp to hmi
+    server = await asyncio.start_server(receive_key, "localhost", 5010)  # tcp to hmi
     async with server:
         await server.serve_forever()
 
@@ -152,7 +153,7 @@ async def client_for_hmi() -> None:
 
         client = AsyncModbusTlsClient(
             "localhost",
-            port=12345,  # modbus to hmi
+            port=5002,  # modbus to hmi
             framer=ModbusTlsFramer,
             certfile=cert,
             keyfile=key,
@@ -171,7 +172,6 @@ async def client_for_hmi() -> None:
     async def read_holding_register() -> None:
         """Reads data from holding register"""
         global client
-        global highest_data_id
 
         try:
             while True:
@@ -246,7 +246,7 @@ async def server_for_switch(context: ModbusServerContext) -> None:
         }
     )
 
-    address = ("localhost", 5002)
+    address = ("localhost", 12345)
 
     await StartAsyncTlsServer(
         context=context,
@@ -315,41 +315,6 @@ async def packet_input() -> None:
 
     while True:
         os.system('clear')
-        y="""                                                                                                                                                                                                      
-          .--.--.       ___                             ,-.  .--.--.                                          
-         /  /    '.   ,--.'|_    ,--,               ,--/ /| /  /    '. ,-.----.                        .--.,  
-        |  :  /`. /   |  | :,' ,--.'|             ,--. :/ ||  :  /`. / \    /  \    ,---.     ,---.  ,--.'  \ 
-        ;  |  |--`    :  : ' : |  |,              :  : ' / ;  |  |--`  |   :    |  '   ,'\   '   ,'\ |  | /\/ 
-        |  :  ;_    .;__,'  /  `--'_       ,---.  |  '  /  |  :  ;_    |   | .\ : /   /   | /   /   |:  : :   
-         \  \    `. |  |   |   ,' ,'|     /     \ '  |  :   \  \    `. .   : |: |.   ; ,. :.   ; ,. ::  | |-, 
-          `----.   \:__,'| :   '  | |    /    / ' |  |   \   `----.   \|   |  \ :'   | |: :'   | |: :|  : :/| 
-          __ \  \  |  '  : |__ |  | :   .    ' /  '  : |. \  __ \  \  ||   : .  |'   | .; :'   | .; :|  |  .' 
-         /  /`--'  /  |  | '.'|'  : |__ '   ; :__ |  | ' \ \/  /`--'  /:     |`-'|   :    ||   :    |'  : '   
-        '--'.     /   ;  :    ;|  | '.'|'   | '.'|'  : |--''--'.     / :   : :    \   \  /  \   \  / |  | |   
-          `--'---'    |  ,   / ;  :    ;|   :    :;  |,'     `--'---'  |   | :     `----'    `----'  |  : \   
-                       ---`-'  |  ,   /  \   \  / '--'                 `---'.|                       |  |,'   
-                                ---`-'    `----'                         `---`                       `--'                                                                                                     
-        """
-
-
-        x="""
-                ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢸⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
-        ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⡏⠀⠀⠀⠀⠀⠀⠀⠀⡀⠀⠀
-        ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠙⢶⣄⠀⢰⡇⠀⠀⠀⠀⠀⠀⣠⡾⠃⠀⠀
-        ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠙⠻⣾⡇⠀⠀⠀⠀⣠⣾⠋⠀⠀⠀⠀
-        ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣿⠀⠀⠀⣠⡾⠟⠁⠀⠀⠀⠀⠀
-        ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢸⣿⣀⣴⡿⠋⠀⠀⠀⠀⠀⠀⠀⠀
-        ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣾⣿⡿⠋⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
-        ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣀⣴⣿⡿⠋⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
-        ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣤⣾⣿⠟⠋⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
-        ⠀⠀⠀⠀⠀⠀⠀⢀⣠⣶⣿⣿⠟⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
-        ⠀⠀⠀⠀⠀⣠⣴⣿⣿⣿⠟⠁⠴⠶⢶⣶⠟⠃⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
-        ⠀⠀⢀⣀⣈⠙⣿⡿⠟⠁⠀⠀⠀⠀⠀⠙⢷⣤⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
-        ⠀⠀⠘⢿⣿⠀⠈⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
-        ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀"""
-
-        art_combined = concatenate_ascii_art(x, y)
-        # print(art_combined)
 
         user_input = await asyncio.to_thread(input, "1. Change next available switch package, include track number \n"
                                                     "2. Drop the next package\n"
@@ -357,32 +322,13 @@ async def packet_input() -> None:
                                                     "Input: ")
 
         user_input = user_input.split(' ')
-
         if int(user_input[0]) == 1:
             change_next = True
             change_value = int(user_input[1])
-        elif int(user_input[0]) == 2:
+        elif int(user_input[1]) == 2:
             drop_next = True
         else:
             await recv_queue.put(int(user_input[1]))
-
-
-def concatenate_ascii_art(art1, art2):
-    lines1 = art1.split('\n')
-    lines2 = art2.split('\n')
-
-    # Make sure both ASCII arts have the same number of lines
-    max_lines = max(len(lines1), len(lines2))
-    lines1.extend([''] * (max_lines - len(lines1)))
-    lines2.extend([''] * (max_lines - len(lines2)))
-
-    # Concatenate corresponding lines
-    result = [line1 + line2 for line1, line2 in zip(lines1, lines2)]
-
-    # Join the lines to form the final ASCII art
-    final_art = '\n'.join(result)
-    
-    return final_art
 
 
 if __name__ == "__main__":
