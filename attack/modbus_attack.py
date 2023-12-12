@@ -349,7 +349,7 @@ async def packet_input() -> None:
         ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀"""
 
         art_combined = concatenate_ascii_art(x, y)
-        print(art_combined)
+        # print(art_combined)
 
         user_input = await asyncio.to_thread(input, "1. Change next available switch package, include track number \n"
                                                     "2. Drop the next package\n"
