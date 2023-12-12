@@ -409,7 +409,6 @@ async def handle_train(idx: int) -> None:
         ]
 
         await send_queue.put(msg)
-        await asyncio.sleep(20)
 
         msg = [
             this_train[5],
