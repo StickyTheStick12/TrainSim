@@ -315,6 +315,41 @@ async def packet_input() -> None:
 
     while True:
         os.system('clear')
+        y="""                                                                                                                                                                                                      
+          .--.--.       ___                             ,-.  .--.--.                                          
+         /  /    '.   ,--.'|_    ,--,               ,--/ /| /  /    '. ,-.----.                        .--.,  
+        |  :  /`. /   |  | :,' ,--.'|             ,--. :/ ||  :  /`. / \    /  \    ,---.     ,---.  ,--.'  \ 
+        ;  |  |--`    :  : ' : |  |,              :  : ' / ;  |  |--`  |   :    |  '   ,'\   '   ,'\ |  | /\/ 
+        |  :  ;_    .;__,'  /  `--'_       ,---.  |  '  /  |  :  ;_    |   | .\ : /   /   | /   /   |:  : :   
+         \  \    `. |  |   |   ,' ,'|     /     \ '  |  :   \  \    `. .   : |: |.   ; ,. :.   ; ,. ::  | |-, 
+          `----.   \:__,'| :   '  | |    /    / ' |  |   \   `----.   \|   |  \ :'   | |: :'   | |: :|  : :/| 
+          __ \  \  |  '  : |__ |  | :   .    ' /  '  : |. \  __ \  \  ||   : .  |'   | .; :'   | .; :|  |  .' 
+         /  /`--'  /  |  | '.'|'  : |__ '   ; :__ |  | ' \ \/  /`--'  /:     |`-'|   :    ||   :    |'  : '   
+        '--'.     /   ;  :    ;|  | '.'|'   | '.'|'  : |--''--'.     / :   : :    \   \  /  \   \  / |  | |   
+          `--'---'    |  ,   / ;  :    ;|   :    :;  |,'     `--'---'  |   | :     `----'    `----'  |  : \   
+                       ---`-'  |  ,   /  \   \  / '--'                 `---'.|                       |  |,'   
+                                ---`-'    `----'                         `---`                       `--'                                                                                                     
+        """
+
+
+        x="""
+                ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢸⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+        ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⡏⠀⠀⠀⠀⠀⠀⠀⠀⡀⠀⠀
+        ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠙⢶⣄⠀⢰⡇⠀⠀⠀⠀⠀⠀⣠⡾⠃⠀⠀
+        ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠙⠻⣾⡇⠀⠀⠀⠀⣠⣾⠋⠀⠀⠀⠀
+        ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣿⠀⠀⠀⣠⡾⠟⠁⠀⠀⠀⠀⠀
+        ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢸⣿⣀⣴⡿⠋⠀⠀⠀⠀⠀⠀⠀⠀
+        ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣾⣿⡿⠋⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+        ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣀⣴⣿⡿⠋⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+        ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣤⣾⣿⠟⠋⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+        ⠀⠀⠀⠀⠀⠀⠀⢀⣠⣶⣿⣿⠟⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+        ⠀⠀⠀⠀⠀⣠⣴⣿⣿⣿⠟⠁⠴⠶⢶⣶⠟⠃⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+        ⠀⠀⢀⣀⣈⠙⣿⡿⠟⠁⠀⠀⠀⠀⠀⠙⢷⣤⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+        ⠀⠀⠘⢿⣿⠀⠈⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+        ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀"""
+
+        art_combined = concatenate_ascii_art(x, y)
+        # print(art_combined)
 
         user_input = await asyncio.to_thread(input, "1. Change next available switch package, include track number \n"
                                                     "2. Drop the next package\n"
@@ -322,14 +357,33 @@ async def packet_input() -> None:
                                                     "Input: ")
 
         user_input = user_input.split(' ')
+
         if int(user_input[0]) == 1:
             change_next = True
             change_value = int(user_input[1])
-        elif int(user_input[1]) == 2:
+        elif int(user_input[0]) == 2:
             drop_next = True
         else:
             await recv_queue.put(int(user_input[1]))
 
+
+def concatenate_ascii_art(art1, art2):
+    lines1 = art1.split('\n')
+    lines2 = art2.split('\n')
+
+    # Make sure both ASCII arts have the same number of lines
+    max_lines = max(len(lines1), len(lines2))
+    lines1.extend([''] * (max_lines - len(lines1)))
+    lines2.extend([''] * (max_lines - len(lines2)))
+
+    # Concatenate corresponding lines
+    result = [line1 + line2 for line1, line2 in zip(lines1, lines2)]
+
+    # Join the lines to form the final ASCII art
+    final_art = '\n'.join(result)
+    
+    return final_art
+    
 
 if __name__ == "__main__":
     loop = asyncio.get_event_loop()
