@@ -1,4 +1,5 @@
 
+
 - [Introduction - Project Structure](#introduction-project-structure)
    * [Simulation Directory](#simulation-directory)
       + [1. TLS Subdirectory](#1-tls-subdirectory)
@@ -36,12 +37,13 @@
          - [Updates to departure time and switch acqusition](#updates-to-departure-time-and-switch-acqusition)
          - [Sensor communications](#sensor-communications)
          - [Updating times from Trafikverket](#updating-times-from-trafikverket)
-- [Description of the Attack Scenario and Steps to Reproduce the Attack](#description-of-the-attack-scenario-and-steps-to-reproduce-the-attack)
 - [Key Rotation and Secure Communication](#key-rotation-and-secure-communication)
    * [Key Rotation for Authentication](#key-rotation-for-authentication)
    * [Secure Communication with Modbus and TCP](#secure-communication-with-modbus-and-tcp)
       + [Authentication Failure Handling](#authentication-failure-handling)
+- [Description of the Attack Scenario and Steps to Reproduce the Attack](#description-of-the-attack-scenario-and-steps-to-reproduce-the-attack)
 - [Known Limitations](#known-limitations)
+- [References](#references)
 
 
 ## Introduction - Project Structure
@@ -302,19 +304,6 @@ Upon arrival or departure, trains communicate their track status to track sensor
 ##### Updating times from Trafikverket
 As the system integrates real-time data from Trafikverket, deleting data poses challenges. Instead of removing trains, the system marks them for deletion. During subsequent queries to Trafikverket, it cross-references the marked data with new data. If absent, the system removes them; otherwise, it retains them for future considerations. This approach maintains consistency in data handling and prevents unexpected inconsistencies.
 
-## Description of the Attack Scenario and Steps to Reproduce the Attack
-The attack scenario hinges on the presumption that the attacker possesses a deep understanding of how the packages are constructed. Crucial knowledge includes the Modbus register size, the use of a flag bit to indicate write operations, comprehension of data semantics, the application of HMAC-SHA256, and the presence of a 2-byte nonce within the packet.
-
-Execution of the attack mandates positioning oneself as a proxy between the SCADA server and the switch. If the simulation is exposed to the internet with open ports, ARP poisoning redirects packets to the attacker. In a local environment, such as our case where the entire simulation resides on the same host, it is assumed there exists a pre-existing means of accessing the machine—a potential backdoor or a method for gaining access to the machine and manipulating simulation files or implementing iptables rules.
-
-To initiate the attack, commence by establishing a connection to the machine through the existing backdoor, in our scenario, an open SSH port. With prior enumeration and possession of login credentials, full control over the machine is attained, allowing for the editing of various components. Notably, while `arrival.json` and `departure.json` are shielded with HMAC, which triggers program termination upon alterations, the usercredentials.json file lacks protection. This vulnerability enables changes to the password and username, granting access to the web HMI for data manipulation.
-
-Rather than concentrating on modifying these JSON files, the execution of the `attack.sh` bash script takes precedence. This script is designed to overwrite port numbers in the `hmi.py` file. Subsequently, a customized attack script is crafted. This script establishes a TCP socket for the SCADA server to connect to and a TCP client to connect to the switch. Active participation in the Diffie-Hellman key exchange ensues, generating two distinct keys—one for the SCADA server and another for the switch. Following this, a Modbus client connects to the simulation, and a Modbus server establishes a connection for the switch.
-
-For seamless transmission and the maintenance of the illusion of direct communication between the SCADA server and the PLC, acknowledging or forwarding the packages sent by the SCADA server to the switch is crucial. The acknowledgment is vital for the SCADA server to perceive ongoing communication with the PLC. Various methods are available, including dropping a package, modifying its content, generating entirely new packages to send to the switch—all while acknowledging that the SCADA package has been received. Another approach involves directly forwarding the payload to the switch, creating a more transparent man-in-the-middle attack that subtly alters specific packages, making detection more challenging.
-
-It is imperative to emphasize the necessity of responding to the SCADA server with the switch status, achieved through a local cache or querying the switch when receiving a request from the HMI. Sending any response without considering the actual switch status is not recommended from a realistic standpoint, as real-life trains typically won't actively query the switch for their status. This precaution is necessary to maintain the integrity of the simulation's realism and avoid unintended consequences on the simulated railway operations.
-
 ## Key Rotation and Secure Communication
 To enhance security measures, the simulation implements key rotation alongside robust cryptographic techniques for secure communication. Key aspects include:
 
@@ -356,6 +345,19 @@ In the event of authentication failures during data transmission, the system pri
 **Receiver's Response:**
 - On the receiver side, in case of an authentication failure, the system rejects the incoming data, logs the failure, and awaits the next package. The authentication failure can both be a signature that differs from the received or that the sequence number for the data is lower than the expected.
 
+## Description of the Attack Scenario and Steps to Reproduce the Attack
+The attack scenario hinges on the presumption that the attacker possesses a deep understanding of how the packages are constructed. Crucial knowledge includes the Modbus register size, the use of a flag bit to indicate write operations, comprehension of data semantics, the application of HMAC-SHA256, and the presence of a 2-byte nonce within the packet.
+
+Execution of the attack mandates positioning oneself as a proxy between the SCADA server and the switch. If the simulation is exposed to the internet with open ports, ARP poisoning redirects packets to the attacker. In a local environment, such as our case where the entire simulation resides on the same host, it is assumed there exists a pre-existing means of accessing the machine—a potential backdoor or a method for gaining access to the machine and manipulating simulation files or implementing iptables rules.
+
+To initiate the attack, commence by establishing a connection to the machine through the existing backdoor, in our scenario, an open SSH port. With prior enumeration and possession of login credentials, full control over the machine is attained, allowing for the editing of various components. Notably, while `arrival.json` and `departure.json` are shielded with HMAC, which triggers program termination upon alterations, the usercredentials.json file lacks protection. This vulnerability enables changes to the password and username, granting access to the web HMI for data manipulation.
+
+Rather than concentrating on modifying these JSON files, the execution of the `attack.sh` bash script takes precedence. This script is designed to overwrite port numbers in the `hmi.py` file. Subsequently, a customized attack script is crafted. This script establishes a TCP socket for the SCADA server to connect to and a TCP client to connect to the switch. Active participation in the Diffie-Hellman key exchange ensues, generating two distinct keys—one for the SCADA server and another for the switch. Following this, a Modbus client connects to the simulation, and a Modbus server establishes a connection for the switch.
+
+For seamless transmission and the maintenance of the illusion of direct communication between the SCADA server and the PLC, acknowledging or forwarding the packages sent by the SCADA server to the switch is crucial. The acknowledgment is vital for the SCADA server to perceive ongoing communication with the PLC. Various methods are available, including dropping a package, modifying its content, generating entirely new packages to send to the switch—all while acknowledging that the SCADA package has been received. Another approach involves directly forwarding the payload to the switch, creating a more transparent man-in-the-middle attack that subtly alters specific packages, making detection more challenging.
+
+It is imperative to emphasize the necessity of responding to the SCADA server with the switch status, achieved through a local cache or querying the switch when receiving a request from the HMI. Sending any response without considering the actual switch status is not recommended from a realistic standpoint, as real-life trains typically won't actively query the switch for their status. This precaution is necessary to maintain the integrity of the simulation's realism and avoid unintended consequences on the simulated railway operations.
+
 ## Known Limitations
 
 While the simulation strives to represent a realistic train station environment, there are certain limitations that users should be aware of:
@@ -375,5 +377,5 @@ While the simulation strives to represent a realistic train station environment,
 
 It's recommended to consider these limitations when using the simulation and to plan scenarios accordingly.
 
-**References**
-    - Citations and references used in the documentation.
+## References
+https://www.itu.int/hub/2020/03/a-revolution-in-railway-communication/ 
