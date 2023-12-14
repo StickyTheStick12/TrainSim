@@ -330,6 +330,9 @@ In addition to key rotation, Modbus communication and TCP connections are fortif
 **TLS Encryption for Modbus:**
 - Modbus communication is secured with Transport Layer Security (TLS). This ensures that data exchanged between devices over Modbus is encrypted, safeguarding it from unauthorized interception.
 
+**Replay Attack Prevention:**
+- To prevent replay attacks the package includes a sequence number that is increased after every sent packet. The receiver only accepts packages whose sequence number is grater than the last received. This also the counter for the key exchange.
+
 **Data Integrity Protection:**
 - To ensure data integrity, the transmitted package includes a hash or signature, calculated with HMAC-SHA256. The receiver replicates this process to authenticate the package, confirming that it has not been tampered with during transmission.
 
